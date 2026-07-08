@@ -2,7 +2,6 @@
 
 from hmac import new
 from soft_fido2 import Fido2Authenticator, KeyPair
-from soft_fido2.credential_id_migrator import CredentialIdMigrator
 from soft_fido2.key_pair import KeyUtils
 import uuid
 import base64
