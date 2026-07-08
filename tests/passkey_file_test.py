@@ -15,8 +15,9 @@ def mock_platform_key():
     # Create a real EC key pair for testing
     private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
     
-    # Create a mock KeyPair
-    mock_kp = MagicMock()
+    # Use spec=KeyPair so hasattr(mock, 'tpm_encrypt') returns False,
+    # routing _save_passkey into the standard EC branch.
+    mock_kp = MagicMock(spec=KeyPair)
     mock_kp.get_private.return_value = private_key
     
     # Patch the __request_platform_kp method

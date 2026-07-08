@@ -2,7 +2,7 @@
 """
 Unit tests for TPM-based key derivation functionality.
 
-Tests the TPM HMAC-based HKDF implementation for passkey seed derivation,
+Tests the TPM ECDH-IKM-based HKDF implementation for passkey seed derivation,
 ensuring deterministic behavior, domain separation, and backward compatibility.
 """
 
@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
 
 from soft_fido2.key_pair import KeyUtils
-from soft_fido2.tpm_device import TPMDevice
+from soft_fido2.platform.tpm_device import TPMDevice, TPMKeyPair
 
 
 class TestTPMDerivation(unittest.TestCase):
@@ -26,15 +26,16 @@ class TestTPMDerivation(unittest.TestCase):
         
         # Mock TPM device and key pair
         self.mock_tpm_device = Mock(spec=TPMDevice)
-        self.mock_tpm_key = Mock()
+        self.mock_tpm_key = Mock(spec=TPMKeyPair)
         self.mock_tpm_key.is_tpm = True
         self.mock_tpm_key.tpm_device = self.mock_tpm_device
         self.mock_tpm_key.handle = 0x8104F1D0
-        
-        # Set up deterministic HMAC output for testing
-        # This simulates the TPM HMAC operation returning a fixed PRK
-        self.test_prk = b'\x01' * 32  # 32-byte PRK for testing
-        self.mock_tpm_device.hmac.return_value = self.test_prk
+        self.mock_tpm_key.tpm_password = b""
+
+        # Set up deterministic IKM output for testing.
+        # _tpm_derive_seed calls tpm_device.ecdh_derive_ikm(persistent_handle, password)
+        self.test_ikm = b'\x01' * 32  # 32-byte IKM for testing
+        self.mock_tpm_device.ecdh_derive_ikm.return_value = self.test_ikm
     
     def test_file_key_derivation_backward_compatibility(self):
         """Test that file-based keys still work with the refactored code"""
@@ -55,10 +56,10 @@ class TestTPMDerivation(unittest.TestCase):
         
         seed = KeyUtils.get_passkey_seed(entropy, self.mock_tpm_key)
         
-        # Verify TPM HMAC was called
-        self.mock_tpm_device.hmac.assert_called_once_with(
-            data=entropy,
-            persistent_handle=self.mock_tpm_key.handle
+        # Verify ecdh_derive_ikm was called with the key's handle and password
+        self.mock_tpm_device.ecdh_derive_ikm.assert_called_once_with(
+            persistent_handle=self.mock_tpm_key.handle,
+            password=self.mock_tpm_key.tpm_password
         )
         
         # Verify seed is properly formatted
@@ -81,16 +82,11 @@ class TestTPMDerivation(unittest.TestCase):
         entropy2 = b"different.com"
         
         # Reset mock to ensure fresh calls
-        self.mock_tpm_device.hmac.reset_mock()
+        self.mock_tpm_device.ecdh_derive_ikm.reset_mock()
         
-        # Set different PRK for different entropy
-        def hmac_side_effect(data, persistent_handle):
-            if data == entropy1:
-                return b'\x01' * 32
-            else:
-                return b'\x02' * 32
-        
-        self.mock_tpm_device.hmac.side_effect = hmac_side_effect
+        # ecdh_derive_ikm returns fixed IKM regardless of entropy;
+        # entropy is the HKDF salt so different entropy → different seed.
+        self.mock_tpm_device.ecdh_derive_ikm.return_value = self.test_ikm
         
         seed1 = KeyUtils.get_passkey_seed(entropy1, self.mock_tpm_key)
         seed2 = KeyUtils.get_passkey_seed(entropy2, self.mock_tpm_key)
@@ -132,98 +128,100 @@ class TestTPMDerivation(unittest.TestCase):
         bad_tpm_key2 = Mock()
         bad_tpm_key2.is_tpm = True
         bad_tpm_key2.tpm_device = Mock()
-        bad_tpm_key2.tpm_device.hmac.return_value = b'\x01' * 32
+        bad_tpm_key2.tpm_device.ecdh_derive_ikm.return_value = b'\x01' * 32
         # Missing handle attribute
         del bad_tpm_key2.handle
         
         with self.assertRaises(AttributeError):
             KeyUtils._tpm_derive_seed(entropy, bad_tpm_key2)
     
-    def test_tpm_hmac_parameters(self):
-        """Test that TPM HMAC is called with correct parameters"""
+    def test_tpm_ikm_parameters(self):
+        """Test that ecdh_derive_ikm is called with correct parameters"""
         entropy = b"test.example.com"
         handle = 0x8104F1D0
+        password = b""
         
         self.mock_tpm_key.handle = handle
+        self.mock_tpm_key.tpm_password = password
         
         KeyUtils.get_passkey_seed(entropy, self.mock_tpm_key)
         
-        # Verify HMAC was called with correct parameters
-        self.mock_tpm_device.hmac.assert_called_once_with(
-            data=entropy,
-            persistent_handle=handle
+        # Verify ecdh_derive_ikm was called with correct parameters
+        self.mock_tpm_device.ecdh_derive_ikm.assert_called_once_with(
+            persistent_handle=handle,
+            password=password
         )
     
     def test_hkdf_info_constant(self):
         """Test that HKDF uses the correct info string"""
-        # This is implicitly tested by the deterministic test,
-        # but we verify the constant is used correctly
+        # The info string should be consistent; verify the output is stable
         entropy = b"example.com"
         
-        # The info string should be b"FIDO2-PASSKEY-SEED"
-        # We can't directly test this without mocking HKDFExpand,
-        # but we verify the output is consistent
         seed1 = KeyUtils.get_passkey_seed(entropy, self.mock_tpm_key)
         seed2 = KeyUtils.get_passkey_seed(entropy, self.mock_tpm_key)
         
         self.assertEqual(seed1, seed2)
 
 
-class TestTPMDeviceHMAC(unittest.TestCase):
-    """Test TPMDevice HMAC functionality"""
+class TestTPMDeviceECDH(unittest.TestCase):
+    """Test TPMDevice ecdh_derive_ikm functionality"""
     
-    @patch('soft_fido2.tpm_device.ESAPI')
-    @patch('soft_fido2.tpm_device.redirect_tcti_to_logging')
-    def test_hmac_basic_operation(self, mock_redirect, mock_esapi_class):
-        """Test basic HMAC operation"""
-        # Set up mocks
+    @patch('soft_fido2.platform.tpm_device.ESAPI')
+    @patch('soft_fido2.platform.tpm_device.redirect_tcti_to_logging')
+    def test_ecdh_derive_ikm_basic_operation(self, mock_redirect, mock_esapi_class):
+        """Test basic ecdh_derive_ikm operation"""
         mock_esapi = MagicMock()
         mock_esapi_class.return_value = mock_esapi
-        
+
         mock_handle = MagicMock()
         mock_esapi.tr_from_tpmpublic.return_value = mock_handle
-        
-        # Mock HMAC result
-        mock_result = MagicMock()
-        mock_result.buffer = b'\xaa' * 32
-        mock_esapi.hmac.return_value = mock_result
-        
-        # Create TPM device and call HMAC
+
+        # Mock read_public to return a public key with ECC point
+        mock_pub = MagicMock()
+        mock_pub.publicArea.unique.ecc.x = b'\x01' * 32
+        mock_pub.publicArea.unique.ecc.y = b'\x02' * 32
+        mock_esapi.read_public.return_value = (mock_pub, None, None)
+
+        # Mock ecdh_zgen to return a Z point
+        mock_z_point = MagicMock()
+        mock_z_point.point.x = b'\xaa' * 32
+        mock_esapi.ecdh_zgen.return_value = mock_z_point
+
         tpm = TPMDevice()
-        data = b"test data"
-        result = tpm.hmac(data)
-        
-        # Verify result
+        result = tpm.ecdh_derive_ikm()
+
+        # Verify result is the x-coordinate of the Z point
         self.assertEqual(result, b'\xaa' * 32)
         self.assertEqual(len(result), 32)
-        
-        # Verify HMAC was called correctly
-        mock_esapi.hmac.assert_called_once()
-        call_args = mock_esapi.hmac.call_args
-        self.assertEqual(bytes(call_args[1]['buffer'].buffer), data)
-    
-    @patch('soft_fido2.tpm_device.ESAPI')
-    @patch('soft_fido2.tpm_device.redirect_tcti_to_logging')
-    def test_hmac_custom_handle(self, mock_redirect, mock_esapi_class):
-        """Test HMAC with custom persistent handle"""
+
+        # Verify ecdh_zgen was called
+        mock_esapi.ecdh_zgen.assert_called_once()
+
+    @patch('soft_fido2.platform.tpm_device.ESAPI')
+    @patch('soft_fido2.platform.tpm_device.redirect_tcti_to_logging')
+    def test_ecdh_derive_ikm_custom_handle(self, mock_redirect, mock_esapi_class):
+        """Test ecdh_derive_ikm with custom persistent handle"""
         mock_esapi = MagicMock()
         mock_esapi_class.return_value = mock_esapi
-        
+
         mock_handle = MagicMock()
         mock_esapi.tr_from_tpmpublic.return_value = mock_handle
-        
-        mock_result = MagicMock()
-        mock_result.buffer = b'\xbb' * 32
-        mock_esapi.hmac.return_value = mock_result
-        
+
+        mock_pub = MagicMock()
+        mock_pub.publicArea.unique.ecc.x = b'\x03' * 32
+        mock_pub.publicArea.unique.ecc.y = b'\x04' * 32
+        mock_esapi.read_public.return_value = (mock_pub, None, None)
+
+        mock_z_point = MagicMock()
+        mock_z_point.point.x = b'\xbb' * 32
+        mock_esapi.ecdh_zgen.return_value = mock_z_point
+
         tpm = TPMDevice()
         custom_handle = 0x81000001
-        result = tpm.hmac(b"data", persistent_handle=custom_handle)
-        
-        # Verify custom handle was used
-        from tpm2_pytss.types import TPM2_HANDLE
+        result = tpm.ecdh_derive_ikm(persistent_handle=custom_handle)
+
+        # Verify the custom handle was used
         mock_esapi.tr_from_tpmpublic.assert_called_once()
-        # The handle should be wrapped in TPM2_HANDLE
         self.assertEqual(result, b'\xbb' * 32)
 
 
@@ -256,27 +254,23 @@ class TestIntegrationScenarios(unittest.TestCase):
         mock_tpm_key.is_tpm = True
         mock_tpm_key.tpm_device = mock_tpm_device
         mock_tpm_key.handle = 0x8104F1D0
-        
+        mock_tpm_key.tpm_password = b""
+
         rp_ids = [b"example.com", b"test.com", b"demo.org"]
         
-        # Set up different HMAC outputs for different RP IDs
-        def hmac_side_effect(data, persistent_handle):
-            # Use hash of data to generate deterministic but different outputs
-            import hashlib
-            return hashlib.sha256(data).digest()
-        
-        mock_tpm_device.hmac.side_effect = hmac_side_effect
+        # ecdh_derive_ikm returns fixed IKM; entropy (HKDF salt) drives uniqueness
+        mock_tpm_device.ecdh_derive_ikm.return_value = b'\x01' * 32
         
         seeds = []
         for rp_id in rp_ids:
             seed = KeyUtils.get_passkey_seed(rp_id, mock_tpm_key)
             seeds.append(seed)
         
-        # All seeds should be unique
+        # All seeds should be unique (different entropy → different HKDF output)
         self.assertEqual(len(seeds), len(set(seeds)))
         
-        # Verify TPM HMAC was called for each RP ID
-        self.assertEqual(mock_tpm_device.hmac.call_count, len(rp_ids))
+        # Verify ecdh_derive_ikm was called for each RP ID
+        self.assertEqual(mock_tpm_device.ecdh_derive_ikm.call_count, len(rp_ids))
 
 
 if __name__ == '__main__':

@@ -14,14 +14,14 @@ import uuid
 from unittest.mock import patch, MagicMock
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
-from soft_fido2.key_pair import KeyUtils
+from soft_fido2.key_pair import KeyUtils, KeyPair
 
 
 @pytest.fixture
 def mock_platform_key():
     """Mock platform key retrieval for tests that don't have qt_app running"""
     private_key = ec.generate_private_key(ec.SECP256R1(), default_backend())
-    mock_kp = MagicMock()
+    mock_kp = MagicMock(spec=KeyPair)
     mock_kp.get_private.return_value = private_key
     
     with patch('soft_fido2.key_pair.KeyUtils._KeyUtils__request_platform_kp', return_value=mock_kp):
