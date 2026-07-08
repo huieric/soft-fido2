@@ -31,17 +31,17 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QIcon
 
 try:
-    from soft_fido2.qt_svc.platform_key_service import PlatformKeyService
-    from soft_fido2.qt_svc.passkey_service import PasskeyService
-    from soft_fido2.qt_svc.credential_service import CredentialService
-    from soft_fido2.qt_ux.advanced_dialog import AdvancedConfigDialog
-    from soft_fido2.qt_ux.config import PlatformConfig
+    from soft_fido2.qt.svc.platform_key_service import PlatformKeyService
+    from soft_fido2.qt.svc.passkey_service import PasskeyService
+    from soft_fido2.qt.svc.credential_service import CredentialService
+    from soft_fido2.qt.ux.advanced_dialog import AdvancedConfigDialog
+    from soft_fido2.qt.ux.config import PlatformConfig
 except ImportError:
-    from qt_svc.platform_key_service import PlatformKeyService
-    from qt_svc.passkey_service import PasskeyService
-    from qt_svc.credential_service import CredentialService
-    from qt_ux.advanced_dialog import AdvancedConfigDialog
-    from qt_ux.config import PlatformConfig
+    from qt.svc.platform_key_service import PlatformKeyService
+    from qt.svc.passkey_service import PasskeyService
+    from qt.svc.credential_service import CredentialService
+    from qt.ux.advanced_dialog import AdvancedConfigDialog
+    from qt.ux.config import PlatformConfig
 
             
 class SettingsDialog(QDialog):
@@ -80,11 +80,11 @@ class SettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle(self.TITLE + " Settings")
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(350)
         self.setMinimumHeight(500)
         
         # Set window icon
-        icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
+        icon_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'icons')
         main_icon_path = os.path.join(icon_dir, 'main_icon.svg')
         if os.path.exists(main_icon_path):
             self.setWindowIcon(QIcon(main_icon_path))
@@ -205,7 +205,7 @@ class SettingsDialog(QDialog):
         controls_layout = QHBoxLayout()
         
         # Get icon directory path
-        icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
+        icon_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'icons')
         
         # Create Platform Key Button
         self.create_key_btn = QPushButton()
@@ -434,7 +434,7 @@ class SettingsDialog(QDialog):
     def _check_tpm_available(self):
         """Check if TPM is available on the system."""
         try:
-            from soft_fido2.tpm_device import TPMDevice
+            from soft_fido2.platform.tpm_device import TPMDevice
             tpm = TPMDevice()
             # Try to get key to verify TPM is actually functional
             try:
@@ -476,10 +476,13 @@ class SettingsDialog(QDialog):
         
         if selected_tpm:
             if tpm_exists:
-                self.status_label.setText("✓ TPM platform key exists")
+                if self.platform_key_service.is_tpm_password_protected():
+                    self.status_label.setText(" TPM platform key exists (password-protected)")
+                else:
+                    self.status_label.setText(" TPM platform key exists")
                 self.status_label.setStyleSheet("color: green;")
             else:
-                self.status_label.setText("✗ No TPM platform key found")
+                self.status_label.setText(" No TPM platform key found")
                 self.status_label.setStyleSheet("color: red;")
         else:
             if file_exists:
@@ -526,8 +529,20 @@ class SettingsDialog(QDialog):
         # Create button: enabled if no key exists for selected type
         self.create_key_btn.setEnabled(not key_exists)
         
-        # Secret input and unlock button: only for file-based password-protected keys
-        if not selected_tpm and file_exists:
+        # Enable secret input for both TPM and file keys if password-protected
+        if selected_tpm and tpm_exists:
+            is_protected = self.platform_key_service.is_tpm_password_protected()
+            self.secret_input.setEnabled(is_protected)
+            
+            if is_protected:
+                has_password = len(self.secret_input.text()) > 0
+                self.unlock_btn.setEnabled(has_password)
+                self._update_unlock_button_style()
+            else:
+                self.unlock_btn.setEnabled(False)
+                self.platform_key_unlocked = False
+                self.unlock_btn.setStyleSheet("")
+        elif not selected_tpm and file_exists:
             is_protected = self._is_key_password_protected()
             self.secret_input.setEnabled(is_protected)
             
@@ -555,10 +570,14 @@ class SettingsDialog(QDialog):
         """
         tpm_exists, file_exists = self._check_cache_key_status()
         selected_tpm = self.tpm_radio.isChecked()
-        
-        # Priority 1: If file key exists, is password-protected, and NOT unlocked, focus on password input
-        if not selected_tpm and file_exists and self._is_key_password_protected() and not self.platform_key_unlocked:
-            return 'secret_input'
+
+        # Priority 1: If the selected key is password-protected and not yet
+        # unlocked, focus the password input so the user knows what to do.
+        if not self.platform_key_unlocked:
+            if selected_tpm and tpm_exists and self.platform_key_service.is_tpm_password_protected():
+                return 'secret_input'
+            if not selected_tpm and file_exists and self._is_key_password_protected():
+                return 'secret_input'
         
         # Priority 2: If no platform key exists, focus on create button
         if not tpm_exists and not file_exists:
@@ -641,8 +660,13 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "No Password", "Please enter the platform key password.")
             return
         
-        # Use platform key service to unlock
-        success, key_pair, message = self.platform_key_service.unlock_key(password)
+        selected_tpm = self.tpm_radio.isChecked()
+        
+        # Use appropriate unlock method based on key type
+        if selected_tpm:
+            success, key_pair, message = self.platform_key_service.unlock_tpm_key(password)
+        else:
+            success, key_pair, message = self.platform_key_service.unlock_key(password)
         
         if success:
             # Mark as unlocked and update UI
@@ -672,23 +696,55 @@ class SettingsDialog(QDialog):
         """Create TPM-based platform key using service."""
         reply = QMessageBox.question(
             self, "Create TPM Key",
-            "Create a new TPM-based platform key?\n\n"
-            "This will use your computer's Trusted Platform Module for secure key storage.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            "Do you want to password-protect the TPM key? (you should)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
         )
         
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+        
+        password = ""
         if reply == QMessageBox.StandardButton.Yes:
-            success, message = self.platform_key_service.create_tpm_key()
+            # Get password from user
+            from PyQt6.QtWidgets import QInputDialog
+            password, ok = QInputDialog.getText(
+                self, "Set Password",
+                "Enter password for TPM key:",
+                QLineEdit.EchoMode.Password
+            )
             
-            if success:
-                # Save the key type preference
-                self.plat_cfg.key_type = 'tpm'
-                QMessageBox.information(self, "Success", message)
-                self._update_cache_status()
-                # Focus on PIN input after successful creation
-                self.pin_input.setFocus()
+            if ok and password:
+                # Confirm password
+                password2, ok2 = QInputDialog.getText(
+                    self, "Confirm Password",
+                    "Confirm password:",
+                    QLineEdit.EchoMode.Password
+                )
+                
+                if ok2:
+                    if password != password2:
+                        QMessageBox.warning(self, "Error", "Passwords do not match.")
+                        return
+                else:
+                    return
             else:
-                QMessageBox.warning(self, "Error", message)
+                return
+        
+        success, message = self.platform_key_service.create_tpm_key(password)
+        
+        if success:
+            # Save the key type preference
+            self.plat_cfg.key_type = 'tpm'
+            QMessageBox.information(self, "Success", message)
+            self._update_cache_status()
+            
+            # Focus appropriately based on whether password was set
+            if password:
+                self.secret_input.setFocus()
+            else:
+                self.pin_input.setFocus()
+        else:
+            QMessageBox.warning(self, "Error", message)
     
     def _save_platform_key(self, passphrase: str = ""):
         """Save file-based platform key using service."""

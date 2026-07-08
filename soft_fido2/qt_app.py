@@ -21,18 +21,18 @@ from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 from PyQt6.QtCore import QThreadPool, QTimer
 try:
     from soft_fido2.message_queues import QueueMessageType, MessageQueue, PlatformKeyRequest, PlatformKeyResponse
-    from soft_fido2.qt_ux.config import PlatformConfig
-    from soft_fido2.qt_ux.workers import Worker
-    from soft_fido2.qt_ux.settings_dialog import SettingsDialog
-    from soft_fido2.qt_ux.main_window import SysTrayMainWindow
-    from soft_fido2.qt_svc.platform_key_service import PlatformKeyService
+    from soft_fido2.qt.ux.config import PlatformConfig
+    from soft_fido2.qt.ux.workers import Worker
+    from soft_fido2.qt.ux.settings_dialog import SettingsDialog
+    from soft_fido2.qt.ux.main_window import SysTrayMainWindow
+    from soft_fido2.qt.svc.platform_key_service import PlatformKeyService
 except:
     from message_queues import QueueMessageType, MessageQueue, PlatformKeyRequest, PlatformKeyResponse
-    from qt_ux.config import PlatformConfig
-    from qt_ux.workers import Worker
-    from qt_ux.settings_dialog import SettingsDialog
-    from qt_ux.main_window import SysTrayMainWindow
-    from qt_svc.platform_key_service import PlatformKeyService
+    from qt.ux.config import PlatformConfig
+    from qt.ux.workers import Worker
+    from qt.ux.settings_dialog import SettingsDialog
+    from qt.ux.main_window import SysTrayMainWindow
+    from qt.svc.platform_key_service import PlatformKeyService
 
 
 class SysTrayApp(QDialog):
@@ -142,6 +142,10 @@ class SysTrayApp(QDialog):
         1. If platform.cfg exists: use configured preference
         2. If no config: try TPM first (if available), then file without password
         3. Stay locked and wait for user action
+        
+        State transitions:
+        - UNLOCKED: Key loaded successfully (no password or already unlocked)
+        - LOCKED: Key exists but requires password
         """
         preferred_key_type = self.plat_cfg.key_type
         success, key_pair, message = self.platform_key_service.auto_load_key(preferred_key_type)
@@ -149,7 +153,10 @@ class SysTrayApp(QDialog):
         if success:
             self._platform_key = key_pair
             self._set_state(self.AppState.UNLOCKED)
+            logging.info(message)
         else:
+            # Key exists but locked (password-protected)
+            self._set_state(self.AppState.LOCKED)
             logging.info(message)
     
     # ============================================================================

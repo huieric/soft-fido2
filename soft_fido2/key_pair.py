@@ -170,42 +170,34 @@ class KeyUtils(object):
     @classmethod
     def _tpm_derive_seed(cls, entropy, tpm_key, info=None):
         """
-        Derive seed using TPM HMAC operations to implement HKDF.
-        
-        This implements HKDF using TPM for the extract phase:
-        1. Extract: PRK = HMAC-SHA256(salt=entropy, key=TPM_key)
-        2. Expand: OKM = HKDF-Expand(PRK, info, length)
-        
-        The TPM key is used implicitly via HMAC operation - the private
-        key material never leaves the TPM.
-        
+        Derive seed using the TPM ECC key as IKM for HKDF.
+
+        Uses ECDH_ZGen(priv, own_pub) via tpm_ecc_private_key.exchange() as the IKM.
+
+        HKDF(salt=entropy, IKM=ecdh_ikm, info=info, length=32)
+
         Args:
             entropy: Salt bytes (typically RP ID bytes)
             tpm_key: TPM KeyPair wrapper with is_tpm=True
             info: Info string (optional, uses default if not provided)
-            
+
         Returns:
             Base64-url encoded 32-byte seed
-            
-        Raises:
-            AttributeError: If tpm_key doesn't have required TPM attributes
         """
         info = cls._normalize_passkey_seed_info(info)
 
-        # PRK = HMAC-SHA256(salt=entropy, IKM=TPM_key)
-        # The TPM key acts as IKM implicitly through the HMAC operation
-        prk = tpm_key.tpm_device.hmac(
-            data=entropy,
-            persistent_handle=tpm_key.handle
+        ikm = tpm_key.tpm_device.ecdh_derive_ikm(
+            persistent_handle=tpm_key.handle,
+            password=tpm_key.tpm_password
         )
-        hkdf_expand = HKDFExpand(
+        hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
+            salt=entropy,
             info=info,
             backend=default_backend()
         )
-        seed_bytes = hkdf_expand.derive(prk)
-        
+        seed_bytes = hkdf.derive(ikm)
         return base64.urlsafe_b64encode(seed_bytes)
 
     @classmethod
@@ -664,11 +656,8 @@ class KeyUtils(object):
         upper_hash = pinHash[16:]
         
         platform_key_pair = cls.__request_platform_kp()
-        platform_key = platform_key_pair.get_private()
 
-        if isinstance(platform_key, ec.EllipticCurvePrivateKey):
-            header = cls.ec_encrypt(upper_hash, platform_key)
-        elif hasattr(platform_key_pair, 'tpm_encrypt'):
+        if hasattr(platform_key_pair, 'tpm_encrypt'):
             platform_public = platform_key_pair.get_public()
             if hasattr(platform_public, 'to_pem'):
                 platform_public = serialization.load_pem_public_key(
@@ -676,7 +665,10 @@ class KeyUtils(object):
                 )
             header = platform_key_pair.tpm_encrypt(upper_hash, platform_public)
         else:
-            raise ValueError(f"{platform_key} must be an EllipticCurvePrivateKey")
+            platform_key = platform_key_pair.get_private()
+            if not isinstance(platform_key, ec.EllipticCurvePrivateKey):
+                raise ValueError(f"{platform_key} must be an EllipticCurvePrivateKey")
+            header = cls.ec_encrypt(upper_hash, platform_key)
         pkcs12_bytes = cls.create_pcks12_bytes(
             key,
             x5c,
@@ -1201,7 +1193,7 @@ class KeyUtils(object):
         raise ValueError(f"Unsupported COSE algorithm: {cose_alg}")
 
 
-class KeyPair(object):  
+class KeyPair(object):
 
     def __init__(self, privateKey, publicKey):
         object.__init__(self)
