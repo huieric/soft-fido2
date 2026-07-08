@@ -172,8 +172,7 @@ class KeyUtils(object):
         """
         Derive seed using the TPM ECC key as IKM for HKDF.
 
-        Uses ECDH_ZGen(priv, own_pub) via tpm_ecc_private_key.exchange() as the
-        IKM — deterministic and key-bound, private key never leaves the TPM.
+        Uses ECDH_ZGen(priv, own_pub) via tpm_ecc_private_key.exchange() as the IKM.
 
         HKDF(salt=entropy, IKM=ecdh_ikm, info=info, length=32)
 
