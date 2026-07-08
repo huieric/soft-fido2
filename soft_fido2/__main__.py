@@ -12,13 +12,13 @@ except ImportError:
     # setproctitle not available, notifications may show __main__.py
     pass
 try:
-    from .passkey_device import CTAP2HIDevice
+    from .passkey_device import CTAPHIDevice
     from .qt_app import SysTrayApp
     from .usbip_device import CTAP2USBIPDevice, USBContainer
 except:
     try:
         sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        from passkey_device import CTAP2HIDevice
+        from passkey_device import CTAPHIDevice
         from qt_app import SysTrayApp
         from usbip_device import CTAP2USBIPDevice, USBContainer
     except Exception as e:
@@ -48,7 +48,7 @@ class DeviceManager:
                 return False
             
             logging.info(f"Starting UHID device on {self.device_path}")
-            self.device = CTAP2HIDevice(self.device_path)
+            self.device = CTAPHIDevice(self.device_path)
             self.device.start()
             return True
     

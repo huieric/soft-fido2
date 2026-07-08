@@ -111,11 +111,8 @@ class Fido2Authenticator(object):
             self.cib = credId
             key = self.fKey or self.sKey
             if self.kp is None and key is not None:
-                try:
-                    self.kp = self._get_key_pair_from_credential_id(credId, key)
-                except Exception as e:
-                    logging.error(f"Failed to reconstruct keypair from credential ID: {e}", exc_info=True)
-                    pass
+                self.kp = self._get_key_pair_from_credential_id(credId, key)
+
         # Generate a new key pair if we still don't have one
         if self.kp is None:
             self.kp = KeyPair.generate_ecdsa()

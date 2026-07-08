@@ -5,8 +5,8 @@ import tempfile
 from contextlib import contextmanager
 
 try:
-    from tpm2_pytss import ESAPI, TPM2B_PUBLIC, TPM2B_SENSITIVE_CREATE, ESYS_TR, TPM2B_DATA, TPML_PCR_SELECTION, TPM2_CAP, TPM2B_MAX_BUFFER
-    from tpm2_pytss.types import TPM2_HANDLE, TPM2B_ECC_POINT, TPM2_ALG
+    from tpm2_pytss import ESAPI, TPM2B_PUBLIC, TPM2B_SENSITIVE_CREATE, ESYS_TR, TPM2B_DATA, TPML_PCR_SELECTION, TPM2_CAP
+    from tpm2_pytss.types import TPM2_HANDLE, TPM2B_ECC_POINT
     _TPM2_PYTSS_AVAILABLE = True
 except ImportError:
     _TPM2_PYTSS_AVAILABLE = False
@@ -15,6 +15,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+from soft_fido2.key_pair import KeyPair
 
 
 @contextmanager
@@ -341,24 +343,20 @@ class TPMDevice(object):
         return decryptor.update(ciphertext[32:]) + decryptor.finalize()
 
 
-    def hmac(self, data: bytes, persistent_handle=None, password: bytes = b""):
+    def ecdh_derive_ikm(self, persistent_handle=None, password: bytes = b"") -> bytes:
         """
-        Perform HMAC-SHA256 operation using TPM key.
-        
-        This method uses the TPM's HMAC capability to compute an HMAC
-        over the provided data using the key stored at the persistent handle.
-        The private key material never leaves the TPM.
-        
+        Derive deterministic IKM from the TPM ECC key using ECDH_ZGen against its
+        own public point. Private key material never leaves the TPM.
+
+        Z = ECDH_ZGen(priv, own_pub) is deterministic for a fixed key pair, so the
+        x-coordinate of Z is suitable as IKM for HKDF.
+
         Args:
-            data: Data to HMAC (bytes)
             persistent_handle: TPM handle (defaults to FIDO2_KEY_BASE)
             password: Optional password to unlock the key (bytes)
-            
+
         Returns:
-            bytes: HMAC output (32 bytes for SHA256)
-            
-        Raises:
-            Exception: If HMAC operation fails
+            bytes: x-coordinate of ECDH_ZGen result (32 bytes for P-256)
         """
         with redirect_tcti_to_logging():
             esapi = ESAPI()
@@ -366,22 +364,17 @@ class TPMDevice(object):
                 persistent_handle = TPM2_HANDLE(self.FIDO2_KEY_BASE)
             handle = esapi.tr_from_tpmpublic(persistent_handle)
             esapi.tr_set_auth(handle, password if password else b"")
-        
-        # Prepare input buffer
-        buffer = TPM2B_MAX_BUFFER()
-        buffer.buffer = data
-        
-        # Perform HMAC operation
-        result = esapi.hmac(
-            handle=handle,
-            buffer=buffer,
-            hash_alg=TPM2_ALG.SHA256
-        )
-        
-        return bytes(result.buffer)
+
+            pub, _, _ = esapi.read_public(handle)
+            own_point = TPM2B_ECC_POINT()
+            own_point.point.x.buffer = bytes(pub.publicArea.unique.ecc.x)
+            own_point.point.y.buffer = bytes(pub.publicArea.unique.ecc.y)
+
+            z_point = esapi.ecdh_zgen(handle, own_point)
+            return bytes(z_point.point.x)
 
 
-class TPMKeyPair:
+class TPMKeyPair(KeyPair):
     """
     Wrapper class for TPM-backed key pairs.
     
@@ -405,10 +398,9 @@ class TPMKeyPair:
             public_key: The public key (cryptography EC public key object)
             tpm_password: Optional password to unlock the key (bytes)
         """
+        super().__init__(privateKey=None, publicKey=public_key)
         self.tpm_handle = tpm_handle
         self.tpm_password = tpm_password if tpm_password else b""
-        self.public = public_key
-        self.private = None  # TPM keys don't expose private key material
         self.is_tpm = True
         self._tpm_device = None
     

@@ -91,8 +91,11 @@ assertion_result = requests.post("https://my.relying.party/assertion/result", js
 
 ## System Authenticator
 
-This module can be run as main to provide a system CTAP2 authenticator service. This integrates with *nix systems via the UHID kernel module. For information on how to set up this python module as a system authenticator, see the [PASSKEY](PASSKEY.md) documentation.
+This module can be run as main to provide a system CTAP2 authenticator service. This allows the module to integrate with systemd via the UHID kernel module. For information on how to set up this python module as a system authenticator, see the [PASSKEY](PASSKEY.md) documentation.
 
+<img src="build/lib/icons/main_icon.svg" alt="FIDO2 Authenticator Icon" width="128" height="128" />
+
+For advanced users the optional extras allow you to use your device's biometric reader to perform User Presence; and the TPM to store credentials issued by the authenticator.
 
 ## Contributing
 

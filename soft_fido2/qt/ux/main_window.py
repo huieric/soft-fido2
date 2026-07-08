@@ -244,7 +244,7 @@ class SysTrayMainWindow:
             timeout=15000,
             actions=[
                 ('accept', 'Accept'),
-                ('accept_u2f', 'Accept [U2F]'),
+                ('accept_u2f', 'Accept [No Pin]'),
                 ('decline', 'Decline')
             ] if self.notification_fw == self.NotificationFramework.DBUS else None
         )
