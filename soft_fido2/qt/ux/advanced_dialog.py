@@ -82,6 +82,7 @@ class AdvancedConfigDialog(QDialog):
         
         self.setLayout(main_layout)
         self.setMinimumWidth(550)
+        self.setMinimumHeight(600)
     
     def _create_warning_label(self):
         """Create warning label at top."""

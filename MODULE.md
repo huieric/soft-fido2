@@ -209,7 +209,7 @@ The above example generates a packed attestation statement using a self-signed X
 There are several other attestation formats that can be used to provide a more trusted attestation statement. These formats require varying additional PKI (keys/certificates) to be provided to the authenticator when it is being constructed / generating the attestation statement.
 
 ## Anon-CA
-Anonymmous Certificate Authority Attestation; defined by Apple, requires the authenticator to add a nonce derrived from the attestation options to an X.509 Extension.
+Anonymous Certificate Authority Attestation; defined by Apple, requires the authenticator to add a nonce derived from the attestation options to an X.509 Extension.
 
 ```python
 from soft_fido2 import cert_utils, key_pair, authenticator
@@ -229,7 +229,7 @@ print(attestation)
 
 
 ## TPM
-Trused Platform Module Attestaion emulates the output of a TPM device. It requires the Autheticator to be constructed with a second Key and Certificate; which serves as the trusted root for the attestation.
+Trusted Platform Module Attestation emulates the output of a TPM device. It requires the Authenticator to be constructed with a second Key and Certificate; which serves as the trusted root for the attestation.
 
 ```python
 from soft_fido2 import cert_utils, key_pair, authenticator
@@ -249,7 +249,7 @@ print(attestation)
 
 ## Android Keystore and Safetynet
 
-The android safetynet attestaion format is sometimes used by android applications. It is based on a JWT strucutre with some additional claims from the attestation ceremony. This format rerquires the authenticator to be constructed with a second Key and Certificate; which serves as the trusted root for the attestation.
+The android safetynet attestation format is sometimes used by android applications. It is based on a JWT structure with some additional claims from the attestation ceremony. This format requires the authenticator to be constructed with a second Key and Certificate; which serves as the trusted root for the attestation.
 
 ```python
 from soft_fido2 import cert_utils, key_pair, authenticator

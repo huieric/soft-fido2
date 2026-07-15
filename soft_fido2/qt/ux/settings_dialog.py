@@ -80,8 +80,8 @@ class SettingsDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle(self.TITLE + " Settings")
-        self.setMinimumWidth(350)
-        self.setMinimumHeight(500)
+        self.setMinimumWidth(375)
+        self.setMinimumHeight(550)
         
         # Set window icon
         icon_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'icons')
@@ -477,22 +477,22 @@ class SettingsDialog(QDialog):
         if selected_tpm:
             if tpm_exists:
                 if self.platform_key_service.is_tpm_password_protected():
-                    self.status_label.setText(" TPM platform key exists (password-protected)")
+                    self.status_label.setText(" TPM key exists (password-protected)")
                 else:
-                    self.status_label.setText(" TPM platform key exists")
+                    self.status_label.setText(" TPM key exists")
                 self.status_label.setStyleSheet("color: green;")
             else:
-                self.status_label.setText(" No TPM platform key found")
+                self.status_label.setText(" No TPM key found")
                 self.status_label.setStyleSheet("color: red;")
         else:
             if file_exists:
                 if self.platform_key_service.is_password_protected():
-                    self.status_label.setText(" Platform key file exists (password-protected)")
+                    self.status_label.setText(" Key file exists (password-protected)")
                 else:
-                    self.status_label.setText(" Platform key file exists")
+                    self.status_label.setText(" Key file exists")
                 self.status_label.setStyleSheet("color: green;")
             else:
-                self.status_label.setText(" No platform key file found")
+                self.status_label.setText(" No key found")
                 self.status_label.setStyleSheet("color: red;")
         
         self._update_platform_key_controls_state()
