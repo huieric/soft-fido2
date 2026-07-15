@@ -244,7 +244,8 @@ class Fido2Authenticator(object):
         key = self.sKey or self.fKey
         if not key:
             # Fallback to hash if no encryption key
-            return hashlib.sha256(keyPair.get_public_bytes()).digest()
+            self.cib = hashlib.sha256(keyPair.get_public_bytes()).digest()
+            return self.cib
         
         private_key = keyPair.get_private()
         

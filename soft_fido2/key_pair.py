@@ -332,43 +332,6 @@ class KeyUtils(object):
         return KeyPair(pk, pk.public_key())
 
     @classmethod
-    def load_mldsa_key(cls, alg, seed):
-        """
-        Load ML-DSA keypair from a 32-byte seed.
-        
-        Args:
-            alg: ML-DSA algorithm name ("ML-DSA-44", "ML-DSA-65", or "ML-DSA-87")
-            seed: 32-byte seed for deterministic key generation
-            
-        Returns:
-            KeyPair with ML-DSA private key and public key
-            
-        Raises:
-            ValueError: If algorithm is unsupported or seed is not 32 bytes
-        """
-        from cryptography.hazmat.primitives.asymmetric.mldsa import (
-            MLDSA44PrivateKey,
-            MLDSA65PrivateKey,
-            MLDSA87PrivateKey
-        )
-        
-        # Map algorithm name to cryptography class
-        alg_map = {
-            "ML-DSA-44": MLDSA44PrivateKey,
-            "ML-DSA-65": MLDSA65PrivateKey,
-            "ML-DSA-87": MLDSA87PrivateKey,
-        }
-        
-        key_class = alg_map.get(alg)
-        if key_class is None:
-            raise ValueError(f"Unsupported ML-DSA algorithm: {alg}")
-
-        private_key = key_class.from_seed_bytes(seed)
-        public_key = private_key.public_key()
-        
-        return KeyPair(private_key, public_key)
-
-    @classmethod
     def der_enc_key(cls, pk):
         return pk.private_bytes(encoding=serialization.Encoding.DER,
                                 format=serialization.PrivateFormat.PKCS8,

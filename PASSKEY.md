@@ -26,9 +26,10 @@ These files are encrypted and protected by your system.
 
 ```bash
 export FIDO_HOME="$HOME/.fido2"
+mkdir $FIDO_HOME
 ```
 ### Environment properties
-These properties are typically stored in `$FIDO_HAME/passkey.env` and are loaded by the systemd service.
+These properties are typically stored in `$FIDO_HOME/passkey.env` and are loaded by the systemd service.
 
 #### SOFT_FIDO2_SKIP_UP (Optional)
 Skip user presence checks during authentication (for testing only).
@@ -159,8 +160,8 @@ The `tpm2_pytss` package may fail to build in virtual environments due to system
 If you need an isolated virtual environment without system site packages, you can manually copy the TPM libraries:
 ```bash
 # After installing system package, copy to venv
-cp -r /usr/lib64/python3.*/site-packages/tpm2_pytss $FIDO_HOME/lib/python3.*/site-packages/
-cp -r /usr/lib64/python3.*/site-packages/tpm2_pytss*.dist-info $FIDO_HOME/lib/python3.*/site-packages/
+cp -r '/usr/lib64/python3.*/site-packages/tpm2_pytss' $FIDO_HOME/lib/python3.*/site-packages/
+cp -r '/usr/lib64/python3.*/site-packages/tpm2_pytss*.dist-info' $FIDO_HOME/lib/python3.*/site-packages/
 ```
 
 
@@ -226,7 +227,7 @@ Create a systemd user service for the passkey authenticator.
 
 ```bash
 # Install soft_fido2
-pip install soft_fido2
+pip install --user soft_fido2[full]
 # Create passkey storage directory
 mkdir -p $HOME/.fido2
 # Create environment file
@@ -242,7 +243,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python -m soft_fido2
+ExecStart=/usr/bin/python3 -m soft_fido2
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=%h/.fido2/passkey.env
@@ -306,7 +307,7 @@ mkdir -p $FIDO_HOME
 ```
 
 **Permission denied on `/dev/uhid`:**
-- Ensure you're in the `udev` group
+- Ensure you're in the `uhid` group
 - Log out and back in after adding yourself to the group
 - Check udev rules are properly configured
 
