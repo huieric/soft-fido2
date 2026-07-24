@@ -565,7 +565,7 @@ class AuthenticatorAPI(object):
         
         seed = KeyUtils.get_passkey_seed(
             rp_id.encode(),
-            ca_kp,
+            ca_kp.get_private(),
             info=cls._get_hkdf_info()
         )
         skey = SymmetricKey(seed.decode())
@@ -654,7 +654,7 @@ class AuthenticatorAPI(object):
         plat_key = KeyUtils._get_platform_kp()
         seed = KeyUtils.get_passkey_seed(
             rpId.encode(),
-            plat_key,
+            plat_key.get_private(),
             info=cls._get_hkdf_info()
         )
         skey = SymmetricKey(seed.decode())
