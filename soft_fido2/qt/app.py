@@ -19,20 +19,13 @@ from enum import Enum
 
 from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
 from PyQt6.QtCore import QThreadPool, QTimer
-try:
-    from soft_fido2.message_queues import QueueMessageType, MessageQueue, PlatformKeyRequest, PlatformKeyResponse
-    from soft_fido2.qt.ux.config import PlatformConfig
-    from soft_fido2.qt.ux.workers import Worker
-    from soft_fido2.qt.ux.settings_dialog import SettingsDialog
-    from soft_fido2.qt.ux.main_window import SysTrayMainWindow
-    from soft_fido2.qt.svc.platform_key_service import PlatformKeyService
-except:
-    from message_queues import QueueMessageType, MessageQueue, PlatformKeyRequest, PlatformKeyResponse
-    from qt.ux.config import PlatformConfig
-    from qt.ux.workers import Worker
-    from qt.ux.settings_dialog import SettingsDialog
-    from qt.ux.main_window import SysTrayMainWindow
-    from qt.svc.platform_key_service import PlatformKeyService
+
+from ..message_queues import QueueMessageType, MessageQueue, PlatformKeyRequest, PlatformKeyResponse
+from .ux.config import PlatformConfig
+from .ux.workers import Worker
+from .ux.settings_dialog import SettingsDialog
+from .ux.main_window import SysTrayMainWindow
+from .svc.platform_key_service import PlatformKeyService
 
 
 class SysTrayApp(QDialog):

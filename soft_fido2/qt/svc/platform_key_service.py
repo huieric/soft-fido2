@@ -29,10 +29,7 @@ import os
 import logging
 from typing import Optional, Tuple, Any
 
-try:
-    from soft_fido2.key_pair import KeyUtils, KeyPair
-except ImportError:
-    from key_pair import KeyUtils, KeyPair
+from ...key_pair import KeyUtils, KeyPair
 
 
 class PlatformKeyService:

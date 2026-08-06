@@ -72,7 +72,7 @@ class PlatformConfig:
 
     @property
     def info_string(self):
-        return self._config.get('info_string', self.DEFAULT_INFO)
+        return str(self._config.get('info_string', self.DEFAULT_INFO))
 
     @info_string.setter
     def info_string(self, value):

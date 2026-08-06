@@ -10,7 +10,6 @@ import logging
 from typing import Optional, Union
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives.asymmetric import ec
 from soft_fido2.authenticator import Fido2Authenticator
 from soft_fido2.symmetric_key import SymmetricKey
 from soft_fido2.key_pair import KeyPair

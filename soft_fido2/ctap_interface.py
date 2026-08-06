@@ -1,31 +1,27 @@
 # Copyrite IBM 2022, 2025
 # IBM Confidential
 
-from soft_fido2.key_pair import KeyPair
-import base64, datetime, multiprocessing, os, sys, random, threading, time, secrets, typing, logging, math, queue
+from _thread import lock
+
+
+from multiprocessing.synchronize import Lock
+
+
+import base64, multiprocessing, os, threading, time, secrets, typing, logging, math, queue
 import cbor2 as cbor
 from enum import Enum, IntEnum
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes, hmac
 
-try:
-    from soft_fido2.message_queues import QueueMessageType, MessageQueue
-    from soft_fido2.uhid_device import UserDevice, BaseStructure, bcolors, dump_bytes, colour_print
-    from soft_fido2.key_pair import KeyPair, KeyUtils
-    from soft_fido2.authenticator import Fido2Authenticator
-    from soft_fido2.symmetric_key import SymmetricKey
-    from soft_fido2.qt.ux.config import PlatformConfig
-    from soft_fido2.u2f_authenticator import U2FAuthenticator
-except ImportError:
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from message_queues import QueueMessageType, MessageQueue
-    from uhid_device import UserDevice, BaseStructure, bcolors, dump_bytes, colour_print
-    from key_pair import KeyPair, KeyUtils
-    from authenticator import Fido2Authenticator
-    from symmetric_key import SymmetricKey
-    from qt_ux.config import PlatformConfig
-    from u2f_authenticator import U2FAuthenticator
+
+from .message_queues import QueueMessageType, MessageQueue
+from .uhid_device import BaseStructure, bcolors, colour_print, dump_bytes
+from .key_pair import KeyPair, KeyUtils
+from .authenticator import Fido2Authenticator
+from .symmetric_key import SymmetricKey
+from .qt.ux.config import PlatformConfig
+from .u2f_authenticator import U2FAuthenticator
 
 #max usb data frame size
 MAX_DATA_FRAME = 64
@@ -41,20 +37,20 @@ class AuthenticatorAPI(object):
     authenticatorSelection
     '''
 
-    _exp_time = 30
+    _exp_time: int = 30
 
     _open_keys = {}
 
     _watchdog = None
-    _lock = multiprocessing.Lock()
+    _lock: Lock = multiprocessing.Lock()
 
-    _pin_retry = 5
+    _pin_retry: int = 5
 
-    _quit = False
+    _quit: bool = False
     
     # Biometric + TPM mode state
-    _biometric_tpm_mode_enabled = False
-    _biometric_tpm_mode_lock = threading.Lock()
+    _biometric_tpm_mode_enabled: bool = False
+    _biometric_tpm_mode_lock: lock = threading.Lock()
 
     def __new__(cls):
         cls._watchdog = threading.Thread(target=cls._token_expiry_check)
@@ -67,7 +63,8 @@ class AuthenticatorAPI(object):
         '''
         while not cls._quit:
             time.sleep(0.005)
-            cls._lock.acquire()
+            if not cls._lock.acquire():
+                return # denied
             cid_list = list(cls._open_keys.keys())
             for cid in cid_list:
                 if math.floor(time.time() - cls._open_keys[cid]["tStart"]) == cls._exp_time:
@@ -79,7 +76,8 @@ class AuthenticatorAPI(object):
 
     @classmethod
     def has_cached_up(cls, cid) -> bool:
-        cls._lock.acquire()
+        if not cls._lock.acquire():
+            return False # denied
         try:
             if cid in cls._open_keys:
                 cached_up = cls._open_keys[cid].get("upv") in ("present", "verified")
@@ -333,7 +331,7 @@ class AuthenticatorAPI(object):
         return passkey_files
 
     @classmethod
-    def _validate_and_create_keypair(cls, passkey: dict, passkey_file: str):
+    def _validate_and_create_keypair(cls, passkey, passkey_file):
         """
         Validates passkey structure and creates KeyPair.
         
@@ -482,14 +480,15 @@ class AuthenticatorAPI(object):
         req_rk = options.get('rk', False)
         user_state = cls.get_user_state(cid)
         if user_state == "verified":
-            colour_print(colour=bcolors.OKGREEN, component='AuthenticatorAPI.attestation_out',
-                        msg='UV context - using pin protected .passkey file key')
             passkey = cls._open_keys[cid] # Strongest path: user was verified via PIN/biometric
-            res_creds = KeyUtils._load_passkey(passkey['ph'],
-                                               passkey['file']).get('res.creds')
-            return passkey, res_creds, 'packed', req_rk
+            if isinstance(passkey, dict) and 'ph' in passkey:
+                colour_print(colour=bcolors.OKGREEN, component='AuthenticatorAPI._resolve_passkey',
+                            msg='UV context - using pin protected .passkey file key')
+                res_creds = KeyUtils._load_passkey(passkey['ph'],
+                                                passkey['file']).get('res.creds')
+                return passkey, res_creds, 'packed', req_rk
         else:
-            colour_print(colour=bcolors.OKGREEN, component='AuthenticatorAPI.attestation_out',
+            colour_print(colour=bcolors.OKGREEN, component='AuthenticatorAPI._resolve_passkey',
                         msg='UP context - using platform key')
         return { # Fallback: use platform key
             'kp': KeyUtils._get_platform_kp()
@@ -497,7 +496,7 @@ class AuthenticatorAPI(object):
 
 
     @classmethod
-    def _check_credential_excluded(cls, rp_id: str, user_id: bytes, res_creds: typing.Optional[list]) -> bool:
+    def _check_credential_excluded(cls, rp_id: str, user_id: bytes, res_creds) -> bool:
         """
         Check if credential already exists for rpID:userID combination.
         Returns True if credential should be excluded.
@@ -517,7 +516,7 @@ class AuthenticatorAPI(object):
         return False
 
     @classmethod
-    def _select_algorithm(cls, pubKeyCredParams: list) -> int:
+    def _select_algorithm(cls, pubKeyCredParams) -> int:
         """Select the best supported COSE algorithm from pubKeyCredParams.
         
         maybe try ML-DSA-44 (-48) if ES256 (-7) not offered.
@@ -529,7 +528,7 @@ class AuthenticatorAPI(object):
             int: Selected COSE algorithm identifier
         """
         supported_algs = [
-            param.get("alg")
+            int(param.get("alg"))
             for param in pubKeyCredParams
             if param.get("type") == "public-key"
         ]
@@ -547,7 +546,7 @@ class AuthenticatorAPI(object):
         return PlatformConfig(fido_home).info_string
 
     @classmethod
-    def _create_authenticator(cls, rp_id: str, passkey: dict, pubKeyCredParams: list) -> tuple[Fido2Authenticator, bytes]:
+    def _create_authenticator(cls, rp_id: str, passkey, pubKeyCredParams) -> tuple[Fido2Authenticator, bytes]:
         """
         Create authenticator and derrive key.
         
@@ -565,7 +564,7 @@ class AuthenticatorAPI(object):
         
         seed = KeyUtils.get_passkey_seed(
             rp_id.encode(),
-            ca_kp.get_private(),
+            ca_kp if hasattr(ca_kp, 'is_tpm') else ca_kp.get_private(),
             info=cls._get_hkdf_info()
         )
         skey = SymmetricKey(seed.decode())
@@ -610,8 +609,8 @@ class AuthenticatorAPI(object):
                                 attestation, authenticator.kp, uv=True, up=True, be=False, bs=False)
         colour_print(colour=bcolors.OKPINK, component='Authenticator.attestation_out',
                     msg=f'credId: {cred_id}; toSign: {base64.b64encode(bytes([*authData, *clientDataHash])).decode()}')
-        attStmt = authenticator.build_packed_attestation_statement(attestation, 
-                                                    clientDataHash, authData, None, authenticator.kp,)
+        attStmt = authenticator.process_attestation_statement(attestation,
+                                                    clientDataHash, authData, None, authenticator.kp)
         colour_print(colour=bcolors.OKPINK, component='Authenticator.attestation_out', 
                      msg='attStmt: {}'.format(attStmt))
         if req_rk == True:
@@ -654,7 +653,7 @@ class AuthenticatorAPI(object):
         plat_key = KeyUtils._get_platform_kp()
         seed = KeyUtils.get_passkey_seed(
             rpId.encode(),
-            plat_key.get_private(),
+            plat_key if hasattr(plat_key, 'is_tpm') else plat_key.get_private(),
             info=cls._get_hkdf_info()
         )
         skey = SymmetricKey(seed.decode())
@@ -688,13 +687,13 @@ class AuthenticatorAPI(object):
     @classmethod
     def assertion_out(cls, rpId, clientDataHash, allowedList, exts, cid):
         if cid in cls._open_keys.keys() and isinstance(cls._open_keys[cid].get('kp'), KeyPair): ## Try return a res cred assertion
-            passkey: dict = cls._open_keys[cid]
+            passkey = cls._open_keys[cid]
             ca_x5c = passkey.get('x5c')
             ca_kp = passkey.get('kp')
             if 'ph' in passkey and 'file' in passkey:
                 resCreds = KeyUtils._load_passkey(passkey['ph'],
                             passkey['file']).get('res.creds')
-                if resCreds != None:
+                if resCreds != None and isinstance(resCreds, list):
                     colour_print(colour=bcolors.OKPINK, component='FIDO2Authenticator.assertion_out',
                                 msg='passkey has resident credentials, adding them to allowed list')
                     for cred in resCreds:
@@ -750,7 +749,7 @@ class CBORCommand(object):
 
     cid = 0xFFFFFFFF
     request = []
-    response: list = []
+    response: list[int] = []
     response_segment = 0
     response_ready = False
     length = 0
@@ -1092,8 +1091,8 @@ class CBORCommand(object):
         # Get user authentication state
         user_state = AuthenticatorAPI.get_user_state(self.cid)
 
-        result = {
-            0x01: ["FIDO_2_0"],
+        result: dict[int, typing.Any] = {
+            0x01: ["FIDO_2_1", "FIDO_2_0"],
             0x02: ['hmac-secret'],
             #0x03: b"\x13\x37\xF1\xD0" * 4,
             0x03: b"\x00" * 16,
@@ -1106,14 +1105,14 @@ class CBORCommand(object):
             colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
                         msg='Returning get_info WITH PIN protocol (user verified)')
         else:  # user_state == "present"
-            result[0x01] += ["U2F_V2"] # Also advertise CTAP1
-            result[0x04]['clientPin'] = False # FF agressively uses this
+            result[0x01] = ["FIDO_2_0", "U2F_V2"] # Advertise CTAP1
+            result[0x04] = {'up': True, 'plat': False}
             colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
                         msg='Returning get_info WITHOUT PIN protocol (user present only - U2F mode)')
         
-        result = bytes( (self.CBORStatusCode.CTAP2_OK).to_bytes(1, 'big') + cbor.dumps(result) )
-        logging.debug(f"len: {len(result)}")
-        return self._set_rsp_fields(list(result))
+        result_bytes = bytes( (self.CBORStatusCode.CTAP2_OK).to_bytes(1, 'big') + cbor.dumps(result) )
+        logging.debug(f"len: {len(result_bytes)}")
+        return self._set_rsp_fields(list(result_bytes))
 
     def _make_cred(self, ba):
         # https://fidoalliance.org/specs/fido-v2.2-rd-20230321/fido-client-to-authenticator-protocol-v2.2-rd-20230321.html#authenticatorMakeCredential
@@ -1183,11 +1182,18 @@ class CBORCommand(object):
         u2f_cla  = apdu[0:1]
         u2f_ins  = apdu[1:2]
         u2f_p1   = apdu[2:3]
-        u2f_data = apdu[7:]
+        u2f_p2   = apdu[3:4]
+        lc = int.from_bytes(apdu[5:7], 'big') if len(apdu) >= 7 else 0
+        u2f_data = apdu[7:7 + lc] if lc > 0 else apdu[7:]
 
         colour_print(colour=bcolors.OKGREEN, component='CBORCommand._u2f_req',
-                     msg='CLA={}; INS={}; P1={}'.format(
-                         u2f_cla.hex(), u2f_ins.hex(), u2f_p1.hex()))
+                     msg='CLA={}; INS={}; P1={}; P2={}; Lc={}'.format(
+                         u2f_cla.hex(), u2f_ins.hex(), u2f_p1.hex(), u2f_p2.hex(), lc))
+        colour_print(colour=bcolors.OKGREEN, component='CBORCommand._u2f_req',
+                     msg='apdu total len={}; u2f_data len={}'.format(len(apdu), len(u2f_data)))
+        if len(u2f_data) > 0:
+            dump_bytes(u2f_data, colour=bcolors.OKGREEN,
+                       component='CBORCommand._u2f_req', msg='u2f_data: ')
 
         if u2f_cla != b'\x00':
             colour_print(colour=bcolors.FAIL, component='CBORCommand._u2f_req',
@@ -1224,10 +1230,15 @@ class CBORCommand(object):
         client_data_hash = u2f_data[0:32]
         app_id_hash      = u2f_data[32:64]
 
+        colour_print(colour=bcolors.OKPURPLE, component='CBORCommand._u2f_register',
+                     msg='clientDataHash={}'.format(client_data_hash.hex()))
+        colour_print(colour=bcolors.OKPURPLE, component='CBORCommand._u2f_register',
+                     msg='appIdHash={}'.format(app_id_hash.hex()))
+
         plat_kp = KeyUtils._get_platform_kp()
         seed = KeyUtils.get_passkey_seed(
             app_id_hash.hex().encode(),
-            plat_kp.get_private(),
+            plat_kp if hasattr(plat_kp, 'is_tpm') else plat_kp.get_private(),
             info=AuthenticatorAPI._get_hkdf_info()
         )
         skey = SymmetricKey(seed.decode())
@@ -1239,9 +1250,9 @@ class CBORCommand(object):
             colour_print(colour=bcolors.FAIL, component='CBORCommand._u2f_register',
                          msg=f'register() failed: {e}')
             return self._u2f_rsp(cid, cmd_byte, b'', sw=b'\x69\x00')
-
-        colour_print(colour=bcolors.OKGREEN, component='CBORCommand._u2f_register',
-                     msg=f'Registration complete, cred_id={auth.cib.hex()}')
+        if auth.cib:
+            colour_print(colour=bcolors.OKGREEN, component='CBORCommand._u2f_register',
+                        msg=f'Registration complete, cred_id={auth.cib.hex()}')
         return self._u2f_rsp(cid, cmd_byte, payload)
 
     def _u2f_authenticate(self, cid, cmd_byte: int, p1: bytes,
@@ -1276,7 +1287,7 @@ class CBORCommand(object):
         plat_kp = KeyUtils._get_platform_kp()
         seed = KeyUtils.get_passkey_seed(
             app_id_hash.hex().encode(),
-            plat_kp.get_private(),
+            plat_kp if hasattr(plat_kp, 'is_tpm') else plat_kp.get_private(),
             info=AuthenticatorAPI._get_hkdf_info()
         )
         skey = SymmetricKey(seed.decode())

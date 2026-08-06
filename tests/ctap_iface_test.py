@@ -112,7 +112,7 @@ class TestCBORCommand:
 
         # UP-only mode: U2F advertised, clientPin disabled, no pin_protocols
         assert 'U2F_V2' in response_cbor[0x01]
-        assert response_cbor[0x04].get('clientPin') is False
+        assert 'clientPin' not in response_cbor[0x04]
         assert 0x06 not in response_cbor  # pin_protocols NOT included
 
     def test_get_info_response_uv_verified(self, test_cid, mock_auth_api):

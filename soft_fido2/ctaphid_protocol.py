@@ -3,87 +3,153 @@
 # IBM Confidential
 # Assisted by watsonx Code Assistant
 
-"""CTAPHID packet structures and framing logic.
+"""Shared primitives and CTAPHID packet structures.
 
-This module contains the packet structure definitions for the CTAP HID protocol,
-which is transport-agnostic and can be used by both USB/IP and UHID implementations.
+BaseStructure, bcolors, and colour_print live here so that both
+uhid_device and usbip_device can import them without creating a
+circular dependency.  This module has no imports from other soft_fido2
+modules, keeping it at the bottom of the dependency graph.
 """
 
-import sys
-import os
+import struct, re, logging
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from usbip_device import BaseStructure, bcolors, colour_print
+
+# Thanks StackOverflow !
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    OKPINK = '\033[95m'
+    OKYELLOW = '\033[93m'
+    OKPURPLE = '\033[35m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def colour_print(colour=bcolors.OKBLUE, component='CTAPHID', msg=''):
+    logging.debug('[' + colour + component + bcolors.ENDC + '] ' + msg)
+
+
+class BaseStructure(object):
+    """Base class for binary protocol structures.
+
+    Subclasses declare ``_fields_`` as a list of ``(name, fmt[, default])``
+    tuples.  The default byte-order prefix is little-endian (``<``); override
+    ``base_pack_format`` in a subclass when big-endian is required.
+    """
+    _fields_ = []
+    base_pack_format = '<'
+
+    def __init__(self, **kwargs):
+        self.init_from_dict(**kwargs)
+        for field in self._fields_:
+            if len(field) > 2:
+                if not hasattr(self, field[0]):
+                    setattr(self, field[0], field[2])
+
+    def init_from_dict(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def size(self):
+        return struct.calcsize(self.format())
+
+    def format(self):
+        pack_format = self.base_pack_format
+        for field in self._fields_:
+            if isinstance(field[1], BaseStructure):
+                pack_format += str(field[1].size()) + 's'
+            elif 'si' == field[1]:
+                pack_format += 'c'
+            elif '<' in field[1] or '>' in field[1]:
+                pack_format += field[1][1:]
+            else:
+                pack_format += field[1]
+        return pack_format.encode('utf-8')
+
+    def pack(self):
+        values = []
+        for field in self._fields_:
+            if isinstance(field[1], BaseStructure):
+                values.append(getattr(self, field[0], field[1]).pack())
+            elif re.match(r'\d*x', field[1]):
+                continue  # skip padding
+            else:
+                if 'si' == field[1]:
+                    values.append(chr(getattr(self, field[0], 0)))
+                else:
+                    values.append(getattr(self, field[0], 0))
+        values = [bytes(v, 'utf-8') if isinstance(v, str) else v for v in values]
+        return struct.pack(self.format(), *values)
+
+    def unpack(self, buf):
+        values = struct.unpack(self.format(), buf)
+        i = 0
+        keys_vals = {}
+        for val in values:
+            if '<' in self._fields_[i][1][0]:
+                val = struct.unpack(
+                    '<' + self._fields_[i][1][1],
+                    struct.pack('>' + self._fields_[i][1][1], val)
+                )[0]
+            keys_vals[self._fields_[i][0]] = val
+            i += 1
+        self.init_from_dict(**keys_vals)
 
 
 class CTAPHIDInitPkt(BaseStructure):
-    """CTAPHID initialization packet.
-    
-    This packet structure is used for the first frame of a CTAPHID message.
-    It contains the channel ID (cid), command byte (cmd), byte count (bcnt),
-    and up to 57 bytes of data.
-    
-    The data field is dynamically sized based on the actual data length.
+    """CTAPHID initialization packet (first frame of a CTAPHID message).
+
+    Fields: channel ID (cid), command byte (cmd), total payload length (bcnt).
+    A ``data`` field is appended dynamically when the caller supplies one.
     """
-    
+
     _fields_ = [
-        ('cid', 'I'),    # Channel identifier (4 bytes)
-        ('cmd', 'B'),    # Command byte (1 byte)
-        ('bcnt', 'H'),   # Byte count - total payload length (2 bytes)
+        ('cid',  'I'),   # Channel identifier (4 bytes)
+        ('cmd',  'B'),   # Command byte (1 byte)
+        ('bcnt', 'H'),   # Byte count – total payload length (2 bytes)
     ]
 
     def __init__(self, **kwargs):
         if 'data' in kwargs:
-            index = None
-            for i, field in enumerate(self._fields_):
-                if field[0] == 'data':
-                    index = i
-                    break
-            if index == None:
-                colour_print(colour=bcolors.OKGREEN, component='CTAPHIDInitPkt.__init__', 
-                           msg='setting data field')
-                self._fields_ += [('data', '%ds' % len(kwargs['data']))]
+            index = next(
+                (i for i, f in enumerate(self._fields_) if f[0] == 'data'),
+                None
+            )
+            data_field = ('data', '%ds' % len(kwargs['data']))
+            if index is None:
+                self._fields_ = list(self._fields_) + [data_field]
             else:
-                colour_print(colour=bcolors.OKGREEN, component='CTAPHIDInitPkt.__init__', 
-                           msg='data already exists as a field, updating it')
-                self._fields_[index] = ('data', '%ds' % len(kwargs['data']))
-            print(self._fields_)
+                self._fields_ = list(self._fields_)
+                self._fields_[index] = data_field
         super().__init__(**kwargs)
 
 
 class CTAPHIDSeqPkt(BaseStructure):
-    """CTAPHID continuation packet.
-    
-    This packet structure is used for continuation frames of a CTAPHID message
-    when the payload exceeds 57 bytes (the capacity of the init packet).
-    It contains the channel ID (cid), sequence number (seq), and up to 59 bytes of data.
-    
-    The data field is dynamically sized based on the actual data length.
+    """CTAPHID continuation packet (subsequent frames of a CTAPHID message).
+
+    Fields: channel ID (cid), sequence number (seq, 0-127).
+    A ``data`` field is appended dynamically when the caller supplies one.
     """
-    
+
     _fields_ = [
-        ('cid', 'I'),    # Channel identifier (4 bytes)
-        ('seq', 'B'),    # Sequence number (1 byte, 0-127)
+        ('cid', 'I'),   # Channel identifier (4 bytes)
+        ('seq', 'B'),   # Sequence number (1 byte, 0-127)
     ]
 
     def __init__(self, **kwargs):
-        print(kwargs)
         if 'data' in kwargs:
-            index = None
-            for i, field in enumerate(self._fields_):
-                if field[0] == 'data':
-                    index = i
-                    break
-            if index == None:
-                print("setting data field")
-                colour_print(colour=bcolors.OKPINK, component='CTAPHIDSeqPkt.__init__', 
-                           msg='setting data field')
-                self._fields_ += [('data', '%ds' % len(kwargs['data']))]
+            index = next(
+                (i for i, f in enumerate(self._fields_) if f[0] == 'data'),
+                None
+            )
+            data_field = ('data', '%ds' % len(kwargs['data']))
+            if index is None:
+                self._fields_ = list(self._fields_) + [data_field]
             else:
-                colour_print(colour=bcolors.OKPINK, component='CTAPHIDSeqPkt.__init__', 
-                           msg='data already exists as a field, updating it')
-                self._fields_[index] = ('data', '%ds' % len(kwargs['data']))
-            print(self._fields_)
-        super(CTAPHIDSeqPkt, self).__init__(**kwargs)
-
-# Made with Bob
+                self._fields_ = list(self._fields_)
+                self._fields_[index] = data_field
+        super().__init__(**kwargs)
