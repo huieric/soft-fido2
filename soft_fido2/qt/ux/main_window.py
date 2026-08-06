@@ -10,18 +10,14 @@ Communicates with parent app via Qt signals/slots and message queues.
 
 import os
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
 
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu
 from PyQt6.QtCore import QTimer
 
-try:
-    from soft_fido2.message_queues import QueueMessageType, MessageQueue
-    from soft_fido2.qt.ux.settings_dialog import SettingsDialog
-except ImportError:
-    from message_queues import QueueMessageType, MessageQueue
-    from qt.ux.settings_dialog import SettingsDialog
+from ...message_queues import QueueMessageType, MessageQueue
+from .settings_dialog import SettingsDialog
 
 try:
     from soft_fido2.platform import Notifier as DBusNotifier
@@ -41,7 +37,12 @@ class SysTrayMainWindow:
     
     Communicates with parent app via Qt signals/slots and message queues.
     """
-    
+
+    _current_notification_id: Optional[int] = None
+    _dbus_notifier: Optional[Any] = None
+    _dbus_listener: Optional[Any] = None
+    _dbus_poll_timer: Optional[QTimer] = None
+
     class NotificationFramework:
         """Notification framework types."""
         DBUS = 0           # Direct D-Bus (primary)

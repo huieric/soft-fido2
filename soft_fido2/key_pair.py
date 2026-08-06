@@ -1,7 +1,6 @@
 # Copyrite IBM 2022, 2025
 # IBM Confidential
 
-from gettext import install
 import struct
 import os
 from typing import Any, Callable, ClassVar, TypedDict, cast
@@ -16,10 +15,9 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF, HKDFExpand
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from soft_fido2.cert_utils import CertUtils
-from soft_fido2.qt.ux.config import PlatformConfig
+from .cert_utils import CertUtils
 
 
 

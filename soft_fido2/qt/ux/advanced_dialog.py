@@ -10,6 +10,7 @@ IBM Confidential
 
 import logging
 import traceback
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -25,12 +26,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QThreadPool, Qt
 
-try:
-    from soft_fido2.qt.ux.workers import Worker
-    from soft_fido2.qt.svc.platform_key_service import PlatformKeyService
-except ImportError:
-    from qt.ux.workers import Worker
-    from qt.svc.platform_key_service import PlatformKeyService
+
+from .workers import Worker
+from ..svc.platform_key_service import PlatformKeyService
 
 
 class AdvancedConfigDialog(QDialog):
@@ -46,6 +44,14 @@ class AdvancedConfigDialog(QDialog):
     """
     
     TITLE = "Advanced Configuration"
+
+    tpm_status_label: Optional[QLabel] = None
+    delete_tpm_btn: Optional[QPushButton] = None
+    file_key_status_label: Optional[QLabel] = None
+    info_input: Optional[QLineEdit] = None
+    update_info_btn: Optional[QPushButton] = None
+    device_status_label: Optional[QLabel] = None
+    restart_device_btn: Optional[QPushButton] = None
     
     def __init__(self, parent, device_manager=None):
         """Initialize advanced config dialog.
@@ -225,6 +231,9 @@ class AdvancedConfigDialog(QDialog):
     
     def _update_tpm_status(self):
         """Update TPM status label."""
+        if not self.tpm_status_label:
+            logging.warning("TPM div not found")
+            return
         if self.tpm_available:
             # Check if key exists using service layer
             try:
@@ -245,6 +254,9 @@ class AdvancedConfigDialog(QDialog):
     
     def _update_device_status(self):
         """Update device status label."""
+        if not self.device_status_label:
+            logging.warning("Device Status div not found")
+            return
         if self.device_manager and hasattr(self.device_manager, 'is_running') and self.device_manager.is_running():
             self.device_status_label.setText("✓ UHID device is running")
             self.device_status_label.setStyleSheet("color: green;")
@@ -253,6 +265,9 @@ class AdvancedConfigDialog(QDialog):
             self.device_status_label.setStyleSheet("color: red;")
 
     def _update_file_key_status(self):
+        if not self.file_key_status_label:
+            logging.warning("File Platform Key Label div not found")
+            return
         """Update file-based platform key status label."""
         # Use service layer to check key existence
         has_key = self.platform_key_service.check_key_exists('file')
@@ -387,6 +402,9 @@ class AdvancedConfigDialog(QDialog):
     
     def _handle_update_info(self):
         """Handle info string update."""
+        if not self.info_input:
+            logging.warning("Info input div not found")
+            return
         try:
             new_info = self.info_input.text().strip()
             
@@ -447,6 +465,9 @@ class AdvancedConfigDialog(QDialog):
     
     def _handle_restart_device(self):
         """Handle UHID device restart."""
+        if not self.restart_device_btn:
+            logging.warning("Restart Button div not found")
+            return
         try:
             if not self.device_manager:
                 QMessageBox.warning(
@@ -485,6 +506,9 @@ class AdvancedConfigDialog(QDialog):
                     
                     def on_restart_complete(result):
                         """Handle restart completion with result."""
+                        if not self.restart_device_btn:
+                            logging.warning("Restart Button div not found")
+                            return
                         try:
                             self.restart_device_btn.setEnabled(True)
                             self.restart_device_btn.setText("Restart UHID Device")
@@ -501,6 +525,9 @@ class AdvancedConfigDialog(QDialog):
                     
                     def on_restart_error(error_info):
                         """Handle restart error."""
+                        if not self.restart_device_btn:
+                            logging.warning("Restart Button div not found")
+                            return
                         try:
                             self.restart_device_btn.setEnabled(True)
                             self.restart_device_btn.setText("Restart UHID Device")

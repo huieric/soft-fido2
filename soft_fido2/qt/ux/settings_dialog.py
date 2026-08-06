@@ -30,18 +30,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QIcon
 
-try:
-    from soft_fido2.qt.svc.platform_key_service import PlatformKeyService
-    from soft_fido2.qt.svc.passkey_service import PasskeyService
-    from soft_fido2.qt.svc.credential_service import CredentialService
-    from soft_fido2.qt.ux.advanced_dialog import AdvancedConfigDialog
-    from soft_fido2.qt.ux.config import PlatformConfig
-except ImportError:
-    from qt.svc.platform_key_service import PlatformKeyService
-    from qt.svc.passkey_service import PasskeyService
-    from qt.svc.credential_service import CredentialService
-    from qt.ux.advanced_dialog import AdvancedConfigDialog
-    from qt.ux.config import PlatformConfig
+
+from ..svc.platform_key_service import PlatformKeyService
+from ..svc.passkey_service import PasskeyService
+from ..svc.credential_service import CredentialService
+from .advanced_dialog import AdvancedConfigDialog
+from .config import PlatformConfig
 
             
 class SettingsDialog(QDialog):
@@ -425,7 +419,7 @@ class SettingsDialog(QDialog):
                 return (app._platform_key is not None and
                         app._current_state == SysTrayApp.AppState.UNLOCKED)
             except ImportError:
-                from qt_app import SysTrayApp
+                from ..app import SysTrayApp
                 app = cast(Any, parent)
                 return (app._platform_key is not None and
                         app._current_state == SysTrayApp.AppState.UNLOCKED)
