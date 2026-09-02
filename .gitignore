@@ -11,3 +11,5 @@ __pycache__
 pyrightconfig.json
 .bob
 .vscode
+fido2_pin
+*.pin

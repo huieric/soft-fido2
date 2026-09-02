@@ -199,6 +199,46 @@ credential yet. The flow is:
 > reachable; no manual key import is required. The earlier "import a Bitwarden
 > private key" approach is no longer used.
 
+### Optional FIDO2 PIN for unattended UV
+
+IBKR/JxBrowser may require user verification and display `PIN required`. The
+official authenticator supports CTAP2 `clientPIN`. For unattended operation,
+create one secret file on AWS and mount it read-only into both containers:
+
+```bash
+cd /home/opadmin/run/global_futures/docker/ibkr/soft-fido2
+umask 077
+printf '%s\n' 'your-fido2-pin' > fido2_pin
+chmod 600 fido2_pin
+```
+
+This is the PIN for the software authenticator, not the IBKR, Linux, SSH, or
+Bitwarden password. Never commit or log this file.
+
+For the soft-fido2 compose service:
+
+```yaml
+volumes:
+  - ./fido2_pin:/run/secrets/fido2_pin:ro
+environment:
+  SOFT_FIDO2_PIN_FILE: /run/secrets/fido2_pin
+  SOFT_FIDO2_WALLET: ibkr
+```
+
+For the IB Gateway compose service, mount the same host file:
+
+```yaml
+volumes:
+  - /home/opadmin/run/global_futures/docker/ibkr/soft-fido2/fido2_pin:/run/secrets/fido2_pin:ro
+environment:
+  FIDO2_PIN_FILE: /run/secrets/fido2_pin
+```
+
+The soft-fido2 entrypoint creates an official PIN-protected `ibkr.passkey` /
+`ibkr.stash` wallet on first boot. The IBGA clicker enters the PIN into the
+Chromium security-key dialog with `xdotool`; the PIN value is never logged.
+Existing wallets are not overwritten.
+
 ## Configuration
 
 | Env var | Default | Purpose |

@@ -9,6 +9,7 @@ WORKDIR /app
 COPY soft_fido2/ soft_fido2/
 COPY pyproject.toml README.md ./
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY provision_passkey.py /usr/local/bin/provision_passkey.py
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Writable directory that stores the platform key and registered passkeys

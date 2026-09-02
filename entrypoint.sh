@@ -15,6 +15,16 @@ if [ ! -f "$FIDO_HOME/platform.key" ]; then
     python -c "from soft_fido2.key_pair import KeyUtils; KeyUtils.create_platform_key()"
 fi
 
+# Create the official PIN-protected wallet before starting the USB/IP service.
+# The PIN is read only from a mounted secret and is never printed.
+if [ ! -f "$FIDO_HOME/${SOFT_FIDO2_WALLET:-ibkr}.passkey" ]; then
+    if [ ! -r "${SOFT_FIDO2_PIN_FILE:-/run/secrets/fido2_pin}" ]; then
+        echo "[entrypoint] missing PIN secret; cannot create the passkey wallet" >&2
+        exit 1
+    fi
+    python /usr/local/bin/provision_passkey.py
+fi
+
 # Headless mode has no fingerprint scanner or GUI to satisfy the "user
 # presence" check, so skip it. Without this, getInfo returns OPERATION_DENIED
 # and the authenticator is unusable. Override to anything else to disable.

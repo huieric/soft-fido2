@@ -13,3 +13,5 @@ systemd
 *.passkey
 *.stash
 platform.key
+fido2_pin
+*.pin

@@ -598,8 +598,12 @@ class KeyUtils(object):
                 raise ValueError('res_creds is not a list')
             elif len(res_creds) > 0 and not isinstance(res_creds[0], dict):
                 raise ValueError('res_creds is not a list of credentials')
-        else: 
-            raise ValueError("No resident credentials found")
+        else:
+            # An empty resident-credential list is valid during the first
+            # makeCredential ceremony. The wallet is created before any RP
+            # credential exists; later makeCredential updates it via
+            # update_passkey().
+            res_creds = []
         # Construct the passkey dictionary
         passkey = {
             'key': key.get_private(),
