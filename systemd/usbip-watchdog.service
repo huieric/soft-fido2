@@ -1,0 +1,13 @@
+[Unit]
+Description=Watchdog: keep soft-fido2 USB/IP passkey attached to the host
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/usbip-watchdog.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
