@@ -1043,14 +1043,14 @@ class CTAP2USBIPDevice(USBDevice):
             rsp_data = CTAPHIDInitPkt(cid=int.from_bytes(cid, 'big'),
                                      cmd=cbor_cmd.ctaphid_cmd,
                                      bcnt=cbor_cmd.bcnt,
-                                     data=data).pack()
+                                     data=bytes(data)).pack()
         else:  # Send continuation sequence packet
             data, seq_num = cbor_cmd.get_rsp_seg(59)
             colour_print(colour=bcolors.WARNING, component='send_response_segment',
                         msg='Sequence number {}'.format(seq_num))
             rsp_data = CTAPHIDSeqPkt(cid=int.from_bytes(cid, 'big'),
                                     seq=seq_num,
-                                    data=data).pack()
+                                    data=bytes(data)).pack()
         
         colour_print(colour=bcolors.WARNING, component='send_response_segment',
                     msg='pad with {} 0 bytes'.format(64 - len(rsp_data)))

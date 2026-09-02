@@ -37,11 +37,10 @@ class BaseStructure(object):
     """Base class for binary protocol structures.
 
     Subclasses declare ``_fields_`` as a list of ``(name, fmt[, default])``
-    tuples.  The default byte-order prefix is little-endian (``<``); override
-    ``base_pack_format`` in a subclass when big-endian is required.
+    tuples. CTAPHID channel IDs and byte counts are network-order (big-endian).
     """
     _fields_ = []
-    base_pack_format = '<'
+    base_pack_format = '>'
 
     def __init__(self, **kwargs):
         self.init_from_dict(**kwargs)
@@ -68,7 +67,7 @@ class BaseStructure(object):
                 pack_format += field[1][1:]
             else:
                 pack_format += field[1]
-        return pack_format.encode('utf-8')
+        return pack_format
 
     def pack(self):
         values = []
