@@ -731,14 +731,14 @@ class CTAP2USBIPDevice(USBDevice):
     product_string = "FIDO2 Passkey"
     serial_string = "00000001"
     
-    # CTAPHID State Management
-    cids = {}  # Channel ID contexts: {cid: {'cborCmd': CBORCommand}}
-    pending = []  # Pending request queue for keep-alive mechanism
-    
     def __init__(self):
         """Initialize USB/IP FIDO2 device"""
         USBDevice.__init__(self)
         self.start_time = datetime.datetime.now()
+        # Per-device state. Class-level dictionaries survive reconnects and
+        # leave completed responses attached to obsolete CIDs.
+        self.cids = {}
+        self.pending = []
     
     # ========================================================================
     # USB/IP Data Handling
@@ -842,11 +842,13 @@ class CTAP2USBIPDevice(USBDevice):
         self.pending.append(worker)
         
         # Check if we have a ready response to send
-        for cid, context in self.cids.items():
-            if context.get('cborCmd') is not None and context['cborCmd'].response_ready:
+        for cid, context in list(self.cids.items()):
+            transaction = context.get('cborCmd')
+            if (transaction is not None and transaction.response_ready
+                    and len(transaction.response) > 0):
                 colour_print(component='CTAP2USBIPDevice._handle_outgoing',
                             msg='Using pending request to send response segment')
-                self.send_response_segment(cid, context['cborCmd'])
+                self.send_response_segment(cid, transaction)
                 return
     
     def _handle_incoming_cmd(self, cmd, usb_req):
@@ -920,11 +922,15 @@ class CTAP2USBIPDevice(USBDevice):
                   msg='Response data')
         data += b'\x00' * (57 - len(data))  # Pad to 57 bytes (64 - 4 CID - 1 cmd - 2 bcnt)
         
-        self.cids[assignedCID] = {'cborCmd': CBORCommand(cid, None, skip_init=True)}
-        self.cids[assignedCID]['cborCmd'].response = list(data)
-        self.cids[assignedCID]['cborCmd'].ctaphid_cmd = int.from_bytes(cmd, 'big')
-        self.cids[assignedCID]['cborCmd'].bcnt = 17
-        self.send_response_segment(cid, self.cids[assignedCID]['cborCmd'])
+        # Register the new channel without retaining this one-shot INIT
+        # response. Retaining it makes later host-IN polls resend the INIT
+        # transaction and starves getInfo/clientPIN responses on the new CID.
+        self.cids[assignedCID] = {'cborCmd': None}
+        init_cmd = CBORCommand(cid, None, skip_init=True)
+        init_cmd.response = list(data)
+        init_cmd.ctaphid_cmd = int.from_bytes(cmd, 'big')
+        init_cmd.bcnt = 17
+        self.send_response_segment(cid, init_cmd)
     
     def ctaphid_cbor(self, usb_req):
         """CTAPHID_CBOR: Process CTAP2 commands
@@ -1065,7 +1071,9 @@ class CTAP2USBIPDevice(USBDevice):
         # If no response buffer left, remove transaction from context
         # Don't do this for the broadcast channel
         if len(cbor_cmd.response) == 0 and cid != b'\xff\xff\xff\xff':
-            del self.cids[cid]['cborCmd']
+            context = self.cids.get(cid)
+            if context is not None and context.get('cborCmd') is cbor_cmd:
+                del self.cids[cid]['cborCmd']
         return
     
     def unlink(self, usb_req):
