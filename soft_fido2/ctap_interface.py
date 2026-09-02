@@ -1092,27 +1092,19 @@ class CBORCommand(object):
                 list((self.CBORStatusCode.CTAP2_ERR_OPERATION_DENIED).to_bytes(1, 'big'))
             )
         
-        # Get user authentication state
-        user_state = AuthenticatorAPI.get_user_state(self.cid)
-
+        # Experimental headless mode: advertise user presence only. This
+        # intentionally avoids clientPIN/UV negotiation so Chromium will not
+        # open a security-key PIN dialog.
         result: dict[int, typing.Any] = {
-            0x01: ["FIDO_2_1", "FIDO_2_0"],
+            0x01: ["FIDO_2_0"],
             0x02: ['hmac-secret'],
-            #0x03: b"\x13\x37\xF1\xD0" * 4,
             0x03: b"\x00" * 16,
-            0x04: {'rk': True, 'up': True, 'plat': False, 'clientPin': True},
+            0x04: {'rk': True, 'up': True, 'plat': False,
+                   'clientPin': False, 'uv': False},
             0x05: 1200,
         }
-
-        if user_state == "verified": # Conditionally include pinProtocols based on user state
-            result[0x06] = [1]  # Include PIN protocol support for verified users
-            colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
-                        msg='Returning get_info WITH PIN protocol (user verified)')
-        else:  # user_state == "present"
-            result[0x01] = ["FIDO_2_0", "U2F_V2"] # Advertise CTAP1
-            result[0x04] = {'up': True, 'plat': False}
-            colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
-                        msg='Returning get_info WITHOUT PIN protocol (user present only - U2F mode)')
+        colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
+                    msg='Returning get_info in UV=false headless experiment mode')
         
         result_bytes = bytes( (self.CBORStatusCode.CTAP2_OK).to_bytes(1, 'big') + cbor.dumps(result) )
         logging.debug(f"len: {len(result_bytes)}")
