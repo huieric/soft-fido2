@@ -407,7 +407,10 @@ class AuthenticatorAPI(object):
 
     @classmethod
     def get_pin_retries(cls, pin_req, cid):
-        cls._pin_retry -= 1
+        # authenticatorClientPIN/getPinRetries is a read-only query. Chromium
+        # may issue it repeatedly while probing/restarting a WebAuthn
+        # ceremony; decrementing here incorrectly exhausted the PIN retries
+        # before the user supplied a PIN.
         return {3: cls._pin_retry}
 
     @classmethod
