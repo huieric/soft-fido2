@@ -372,6 +372,21 @@ class DeviceDescriptor(USBDescriptor):
         ('bNumConfigurations', 'B')
     ]
 
+
+class DeviceQualifierDescriptor(USBDescriptor):
+    """USB 2.0 device qualifier descriptor (type 0x06, exactly 10 bytes)."""
+    _fields_ = [
+        ('bLength', 'B', 10),
+        ('bDescriptorType', 'B', 0x06),
+        ('bcdUSB', 'H', 0x0200),
+        ('bDeviceClass', 'B'),
+        ('bDeviceSubClass', 'B'),
+        ('bDeviceProtocol', 'B'),
+        ('bMaxPacketSize0', 'B', 8),
+        ('bNumConfigurations', 'B', 1),
+        ('bReserved', 'B', 0),
+    ]
+
 class DeviceConfigurations(USBDescriptor):
     _fields_ = [
         ('bLength', 'B', 9),
@@ -563,6 +578,16 @@ class USBDevice():
             handled = True
             ret= self.all_configurations[:control_req.wLength]
             #print(ret)
+            self.send_usb_req(ret, len(ret), seqnum=usb_req.seqnum)
+        elif desc_type == 0x06:  # Device qualifier descriptor
+            handled = True
+            ret = DeviceQualifierDescriptor(
+                bDeviceClass=self.bDeviceClass,
+                bDeviceSubClass=self.bDeviceSubClass,
+                bDeviceProtocol=self.bDeviceProtocol,
+                bMaxPacketSize0=8,
+                bNumConfigurations=self.bNumConfigurations,
+            ).pack()[:control_req.wLength]
             self.send_usb_req(ret, len(ret), seqnum=usb_req.seqnum)
         return handled
 
