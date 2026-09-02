@@ -556,8 +556,9 @@ class KeyUtils(object):
 
     @classmethod
     def __get_upper_hash(cls, ciphertext, secret=None):
-        # Get platform key via message queue to decrypt the header
-        platform_key = cls.__request_platform_kp()
+        # Prefer the active Qt/TPM provider, but fall back to the filesystem
+        # key in headless Docker mode where no message-queue responder exists.
+        platform_key = cls._get_platform_kp(secret=secret)
         # Decrypt the upper hash using the platform key
         # For TPM keys, pass the full KeyPair wrapper; for file keys, pass the private key
         key_for_decrypt = platform_key if hasattr(platform_key, 'tpm_decrypt') else platform_key.get_private()
@@ -633,7 +634,9 @@ class KeyUtils(object):
         #TODO else if upper hash does not match current file, sync error
         upper_hash = pinHash[16:]
         
-        platform_key_pair = cls.__request_platform_kp()
+        # In desktop mode this may be supplied by Qt/TPM. In headless Docker
+        # mode there is no message-queue responder, so use FIDO_HOME/platform.key.
+        platform_key_pair = cls._get_platform_kp(secret=secret)
 
         if hasattr(platform_key_pair, 'tpm_encrypt'):
             platform_public = platform_key_pair.get_public()
