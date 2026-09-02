@@ -739,6 +739,10 @@ class CTAP2USBIPDevice(USBDevice):
         # leave completed responses attached to obsolete CIDs.
         self.cids = {}
         self.pending = []
+        # The official CBOR engine uses this queue for CTAP responses and
+        # keep-alive handling. The UHID transport initializes it in its own
+        # constructor; USB/IP must initialize it explicitly as well.
+        CBORCommand.set_pending(self.pending)
     
     # ========================================================================
     # USB/IP Data Handling
