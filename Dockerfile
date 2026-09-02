@@ -20,6 +20,9 @@ VOLUME ["/run/fido"]
 
 # The authenticator requires FIDO_HOME to locate its key material.
 ENV FIDO_HOME=/run/fido
+# The source package is copied to /app/soft_fido2, while the provisioning
+# helper is installed in /usr/local/bin. Keep /app on Python's import path.
+ENV PYTHONPATH=/app
 
 EXPOSE 3240
 

@@ -4,6 +4,7 @@ set -euo pipefail
 
 FIDO_HOME="${FIDO_HOME:-/run/fido}"
 export FIDO_HOME
+export PYTHONPATH="/app${PYTHONPATH:+:${PYTHONPATH}}"
 
 mkdir -p "$FIDO_HOME"
 
