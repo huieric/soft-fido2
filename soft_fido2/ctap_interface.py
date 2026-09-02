@@ -790,7 +790,11 @@ class CBORCommand(object):
         self.response_ready = False
         colour_print(colour=bcolors.OKPURPLE, component='CBORCommand.__init__', 
                 msg="command {}; length {}; self.request[{}]".format(self.cmd, self.length, len(self.request)))
-        if self.length >= len(self.request):
+        # The initial CTAPHID frame may contain the complete request. Equal
+        # lengths mean complete, not segmented; using >= here leaves every
+        # exact-fit single-frame command (notably clientPIN/getPinRetries)
+        # waiting forever for a continuation that will never arrive.
+        if self.length > len(self.request):
             colour_print(colour=bcolors.OKPURPLE, component='CBORCommand.__init__', 
                     msg="request is segmented, wait for the whole message")
         else: #We have the whole message
