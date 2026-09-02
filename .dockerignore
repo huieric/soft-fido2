@@ -1,0 +1,15 @@
+.git
+.github
+__pycache__
+*.pyc
+.venv
+venv
+dist
+build
+*.egg-info
+tests
+docs
+systemd
+*.passkey
+*.stash
+platform.key

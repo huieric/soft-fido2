@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# entrypoint.sh — prepare FIDO_HOME and launch the headless USB/IP authenticator.
+set -euo pipefail
+
+FIDO_HOME="${FIDO_HOME:-/run/fido}"
+export FIDO_HOME
+
+mkdir -p "$FIDO_HOME"
+
+# On first boot the platform key does not exist yet. Generate it once so that
+# makeCredential (registration) can derive per-RP keys and persist resident
+# credentials. It is an EC P-256 key written to ${FIDO_HOME}/platform.key.
+if [ ! -f "$FIDO_HOME/platform.key" ]; then
+    echo "[entrypoint] Generating platform key in $FIDO_HOME ..." >&2
+    python -c "from soft_fido2.key_pair import KeyUtils; KeyUtils.create_platform_key()"
+fi
+
+# Headless mode has no fingerprint scanner or GUI to satisfy the "user
+# presence" check, so skip it. Without this, getInfo returns OPERATION_DENIED
+# and the authenticator is unusable. Override to anything else to disable.
+export SOFT_FIDO2_SKIP_UP="${SOFT_FIDO2_SKIP_UP:-true}"
+
+exec python -m soft_fido2 \
+    --transport usbip \
+    --port "${SOFT_FIDO2_PORT:-3240}" \
+    --no-systray

@@ -13,8 +13,12 @@ except ImportError:
     pass
 
 from .passkey_device import CTAPHIDevice
-from .qt.app import SysTrayApp
 from .usbip_device import CTAP2USBIPDevice, USBContainer
+
+# NOTE: PyQt6 (SysTrayApp) is only needed for the interactive UHID desktop
+# mode. Do NOT import it at module level here: the headless USB/IP server must
+# run without PyQt6 installed (slim container image), and importing
+# ``soft_fido2.qt.app`` drags in the whole Qt tree.
 
 
 class DeviceManager:
@@ -176,6 +180,7 @@ Examples:
             sys.exit(1)
         try:
             if not args.no_systray:
+                from .qt.app import SysTrayApp
                 _ = SysTrayApp(device_manager=device_manager) # runs until quit
             else:
                 # Run without systray - just wait for interrupt

@@ -1,0 +1,25 @@
+[Unit]
+Description=Attach soft-fido2 USB/IP passkey as a host USB device
+# The USB/IP server runs inside the soft-fido2 Docker container; it must be
+# listening on TCP 3240 before usbip can attach to it.
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# 1. Load the vhci-hcd kernel module (host side).
+ExecStartPre=/sbin/modprobe vhci-hcd
+
+# 2. Wait up to 60s for the USB/IP server to listen on 127.0.0.1:3240.
+ExecStartPre=/usr/bin/bash -c 'for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/3240) 2>/dev/null && exit 0; sleep 1; done; echo "soft-fido2 server not reachable"; exit 1'
+
+# 3. Attach the exported device (busid 1-1.1 is what USBContainer registers).
+ExecStart=/usr/bin/usbip attach -r 127.0.0.1 -b 1-1.1
+
+# 4. Detach on stop (port 00 is the first vhci port; check with `usbip port`).
+ExecStop=/usr/bin/usbip detach -p 00
+
+[Install]
+WantedBy=multi-user.target

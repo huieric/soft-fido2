@@ -1,0 +1,15 @@
+services:
+  soft-fido2:
+    image: ghcr.io/huieric/soft-fido2:latest
+    container_name: soft-fido2
+    network_mode: host          # usbip client on the host connects to 127.0.0.1:3240
+    restart: unless-stopped
+    volumes:
+      # Persists platform.key + registered .passkey/.stash files.
+      - soft-fido2-data:/run/fido
+    environment:
+      FIDO_HOME: /run/fido
+      SOFT_FIDO2_PORT: "3240"
+
+volumes:
+  soft-fido2-data:

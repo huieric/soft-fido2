@@ -1,9 +1,6 @@
 # Copyrite IBM 2022, 2025
 # IBM Confidential
 
-from _thread import lock
-
-
 from multiprocessing.synchronize import Lock
 
 
@@ -50,7 +47,7 @@ class AuthenticatorAPI(object):
     
     # Biometric + TPM mode state
     _biometric_tpm_mode_enabled: bool = False
-    _biometric_tpm_mode_lock: lock = threading.Lock()
+    _biometric_tpm_mode_lock: threading.Lock = threading.Lock()
 
     def __new__(cls):
         cls._watchdog = threading.Thread(target=cls._token_expiry_check)

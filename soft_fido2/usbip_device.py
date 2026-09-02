@@ -29,7 +29,7 @@ advised of the possibility of such damage.
 Update 2022 by Lachlan Gleeson for python 3
 '''
 
-import socketserver, datetime, struct, traceback, re, signal, threading, random, time
+import socketserver, datetime, struct, traceback, re, signal, threading, random, time, logging
 from typing import Optional
 
 from .ctaphid_protocol import BaseStructure as _BaseStructure, bcolors, colour_print, CTAPHIDInitPkt, CTAPHIDSeqPkt
@@ -67,6 +67,14 @@ class BaseStructure(_BaseStructure):
     ``packDevicesList`` for multi-device list encoding.
     """
     base_pack_format = '>'
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # `__getattr__` below makes `hasattr` always return True, so the base
+        # __init__ never applies field defaults. Apply them here explicitly.
+        for field in self._fields_:
+            if len(field) > 2 and getattr(self, field[0], None) is None:
+                setattr(self, field[0], field[2])
 
     def __getattr__(self, name):
         """Return None for undefined attributes instead of raising AttributeError."""
@@ -326,26 +334,37 @@ class USBIPUnlinkRet(BaseStructure):
     ]
 
 
-class StandardDeviceRequest(BaseStructure):
+class USBDescriptor(BaseStructure):
+    """USB descriptor structures are little-endian per the USB spec.
+
+    ``BaseStructure`` is big-endian (correct for the USB/IP wire protocol),
+    but descriptor blobs sent to the host must be little-endian. All USB
+    descriptor classes below inherit from this.
+    """
+    base_pack_format = '<'
+
+
+class StandardDeviceRequest(USBDescriptor):
+    """USB control transfer SETUP packet (8 bytes, all little-endian)."""
     _fields_ = [
         ('bmRequestType', 'B'),
         ('bRequest', 'B'),
         ('wValue', 'H'),
         ('wIndex', 'H'),
-        ('wLength', '<H')
+        ('wLength', 'H')
     ]
 
-class DeviceDescriptor(BaseStructure):
+class DeviceDescriptor(USBDescriptor):
     _fields_ = [
         ('bLength', 'B', 18),
         ('bDescriptorType', 'B', 1),
-        ('bcdUSB', 'H', 0x1001),
+        ('bcdUSB', 'H', 0x0200),  # USB 2.0
         ('bDeviceClass', 'B'),
         ('bDeviceSubClass', 'B'),
         ('bDeviceProtocol', 'B'),
         ('bMaxPacketSize0', 'B'),
-        ('idVendor', '>H'),
-        ('idProduct', '>H'),
+        ('idVendor', 'H'),
+        ('idProduct', 'H'),
         ('bcdDevice', 'H'),
         ('iManufacturer', 'B'),
         ('iProduct', 'B'),
@@ -353,11 +372,11 @@ class DeviceDescriptor(BaseStructure):
         ('bNumConfigurations', 'B')
     ]
 
-class DeviceConfigurations(BaseStructure):
+class DeviceConfigurations(USBDescriptor):
     _fields_ = [
         ('bLength', 'B', 9),
         ('bDescriptorType', 'B', 2),
-        ('wTotalLength', 'H', 0x2900),
+        ('wTotalLength', 'H', 41),  # config+interface+HID+2 endpoints = 41
         ('bNumInterfaces', 'B', 1),
         ('bConfigurationValue', 'B', 1),
         ('iConfiguration', 'B', 0),
@@ -366,7 +385,7 @@ class DeviceConfigurations(BaseStructure):
     ]
 
 
-class InterfaceDescriptor(BaseStructure):
+class InterfaceDescriptor(USBDescriptor):
     _fields_ = [
         ('bLength', 'B', 9),
         ('bDescriptorType', 'B', 4),
@@ -380,13 +399,13 @@ class InterfaceDescriptor(BaseStructure):
     ]
 
 
-class EndPoint(BaseStructure):
+class EndPoint(USBDescriptor):
     _fields_ = [
         ('bLength', 'B', 7),
         ('bDescriptorType', 'B', 0x5),
         ('bEndpointAddress', 'B', 0x81),
         ('bmAttributes', 'B', 0x3),
-        ('wMaxPacketSize', 'H', 0x8000),
+        ('wMaxPacketSize', 'H', 0x0040),
         ('bInterval', 'B', 0x0A)
     ]
 
@@ -443,6 +462,31 @@ class USBDevice():
     bConfigurationValue = 1
     bNumInterfaces = 1
     configurations = []
+    # USB string descriptors (index 1=manufacturer, 2=product, 3=serial).
+    # Empty strings leave the corresponding index unanswered (STALL-ish).
+    manufacturer_string = ""
+    product_string = ""
+    serial_string = ""
+
+    @staticmethod
+    def _usb_string_descriptor(text):
+        """Pack a UTF-16LE USB string descriptor (type 0x03)."""
+        utf16 = text.encode('utf-16-le')
+        return bytes([len(utf16) + 2, 0x03]) + utf16
+
+    def _usb_string_descriptor_by_index(self, index):
+        """Return the packed string descriptor for a string index, or b''."""
+        if index == 0:
+            data = (0x0409).to_bytes(2, 'little')  # English (US) LANGID
+            return bytes([len(data) + 2, 0x03]) + data
+        strings = {
+            1: self.manufacturer_string,
+            2: self.product_string,
+            3: self.serial_string,
+        }
+        if index in strings and strings[index]:
+            return self._usb_string_descriptor(strings[index])
+        return b''
 
     def __init__(self):
         self.generate_raw_configuration()
@@ -492,8 +536,10 @@ class USBDevice():
 
     def handle_get_descriptor(self, control_req, usb_req):
         handled = False
-        #print("handle_get_descriptor {}".format(control_req.wValue,'n'))
-        if control_req.wValue == 0x1: # Device
+        # wValue (little-endian) = (descriptor_type << 8) | descriptor_index
+        desc_type = control_req.wValue >> 8
+        desc_index = control_req.wValue & 0xFF
+        if desc_type == 0x01:  # Device descriptor
             handled = True
             ret=DeviceDescriptor(bDeviceClass=self.bDeviceClass,
                                  bDeviceSubClass=self.bDeviceSubClass,
@@ -502,12 +548,18 @@ class USBDevice():
                                  idVendor=self.vendorID,
                                  idProduct=self.productID,
                                  bcdDevice=self.bcdDevice,
-                                 iManufacturer=0,
-                                 iProduct=0,
-                                 iSerialNumber=0,
+                                 iManufacturer=1 if self.manufacturer_string else 0,
+                                 iProduct=2 if self.product_string else 0,
+                                 iSerialNumber=3 if self.serial_string else 0,
                                  bNumConfigurations=1).pack()
             self.send_usb_req(ret, len(ret), seqnum=usb_req.seqnum)
-        elif control_req.wValue == 0x2: # configuration descriptor
+        elif desc_type == 0x03:  # String descriptor
+            handled = True
+            ret = self._usb_string_descriptor_by_index(desc_index)
+            if ret:
+                ret = ret[:control_req.wLength]
+            self.send_usb_req(ret, len(ret), seqnum=usb_req.seqnum)
+        elif desc_type == 0x02:  # Configuration descriptor
             handled = True
             ret= self.all_configurations[:control_req.wLength]
             #print(ret)
@@ -560,7 +612,7 @@ class USBDevice():
 # FIDO2 HID Descriptors and Configuration
 # ============================================================================
 
-class CTAP2HIDClass(BaseStructure):
+class CTAP2HIDClass(USBDescriptor):
     """HID Class Descriptor for FIDO2 Authenticator"""
     _fields_ = [
         ('bLength', 'B', 9),
@@ -579,7 +631,7 @@ fido2_hid_class = CTAP2HIDClass(
     bCountryCode=0x0,
     bNumDescriptors=0x1,
     bDescriptprType2=0x22,  # Report
-    wDescriptionLength=0x3F00  # Little endian
+    wDescriptionLength=34  # report descriptor length (see generate_fido2_report)
 )
 
 # Interface Descriptor for FIDO2
@@ -596,7 +648,7 @@ fido2_interface_d = InterfaceDescriptor(
 fido2_end_point_one = EndPoint(
     bEndpointAddress=0x04,
     bmAttributes=0x3,  # Interrupt transfer
-    wMaxPacketSize=(64 & 0x00FF) << 8 | (64 & 0xFF00),  # 64-byte packet max
+    wMaxPacketSize=64,  # 64-byte packet max
     bInterval=5  # Poll every 5 millisecond
 )
 
@@ -604,7 +656,7 @@ fido2_end_point_one = EndPoint(
 fido2_end_point_two = EndPoint(
     bEndpointAddress=0x8E,
     bmAttributes=0x3,  # Interrupt transfer
-    wMaxPacketSize=(64 & 0x00FF) << 8 | (64 & 0xFF00),  # 64-byte packet max
+    wMaxPacketSize=64,  # 64-byte packet max
     bInterval=5  # Poll every 5 millisecond
 )
 
@@ -612,7 +664,7 @@ fido2_interface_d.descriptions = [fido2_hid_class]  # pyright: ignore
 fido2_interface_d.endpoints = [fido2_end_point_two, fido2_end_point_one]  # pyright: ignore
 # Device Configuration
 fido2_configuration = DeviceConfigurations(
-    wTotalLength=0x2900,
+    wTotalLength=41,  # config(9)+interface(9)+HID(9)+2 endpoints(7+7)
     bNumInterfaces=0x1,
     bConfigurationValue=0x1,
     iConfiguration=0x0,  # No string
@@ -649,6 +701,10 @@ class CTAP2USBIPDevice(USBDevice):
     bDeviceSubClass = 0x0
     bDeviceProtocol = 0x0
     configurations = [fido2_configuration]
+    # Friendly names shown by `lsusb` / `usbip port` (USB string descriptors).
+    manufacturer_string = "soft-fido2"
+    product_string = "FIDO2 Passkey"
+    serial_string = "00000001"
     
     # CTAPHID State Management
     cids = {}  # Channel ID contexts: {cid: {'cborCmd': CBORCommand}}
@@ -658,9 +714,6 @@ class CTAP2USBIPDevice(USBDevice):
         """Initialize USB/IP FIDO2 device"""
         USBDevice.__init__(self)
         self.start_time = datetime.datetime.now()
-        # Initialize the CTAP2 API
-        from .passkey_device import AuthenticatorAPI
-        AuthenticatorAPI()
     
     # ========================================================================
     # USB/IP Data Handling
@@ -690,7 +743,7 @@ class CTAP2USBIPDevice(USBDevice):
         handled = False
         if control_req.bmRequestType == 0x81:  # Interface request
             if control_req.bRequest == 0x6:  # Get Descriptor
-                if control_req.wValue == 0x22:  # send initial report
+                if (control_req.wValue >> 8) == 0x22:  # HID Report descriptor
                     print('[' + bcolors.OKGREEN + 'CTAP2USBIPDevice' + bcolors.ENDC + 
                           '] Send initial report ')
                     ret = self.generate_fido2_report()
@@ -724,6 +777,9 @@ class CTAP2USBIPDevice(USBDevice):
         Args:
             usb_req: USB request with CTAPHID frame data
         """
+        log = logging.getLogger("soft_fido2")
+        log.info("INCOMING frame ep=%s: %s", usb_req.ep,
+                 usb_req.data_frame.hex())
         if len(self.pending) == 0:
             colour_print(colour=bcolors.FAIL, component="CTAP2USBIPDevice._handle_incoming",
                         msg="No pending request to respond with :(")
@@ -834,10 +890,10 @@ class CTAP2USBIPDevice(USBDevice):
         data = nonce + assignedCID
         # protocol == 2; major version == 5; minor version = 1; build version = 2; capabilities
         for i in [2, 5, 1, 2, 0x04 | 0x08]:
-            data += int.to_bytes(i)
+            data += bytes([i])
         dump_bytes(data, colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_init',
                   msg='Response data')
-        data += b'\00' * (57 - len(data))  # Pad to 57 bytes (64 - 4 CID - 1 cmd - 2 bcnt)
+        data += b'\x00' * (57 - len(data))  # Pad to 57 bytes (64 - 4 CID - 1 cmd - 2 bcnt)
         
         self.cids[assignedCID] = {'cborCmd': CBORCommand(cid, None, skip_init=True)}
         self.cids[assignedCID]['cborCmd'].response = list(data)
@@ -858,7 +914,11 @@ class CTAP2USBIPDevice(USBDevice):
         cmd = usb_req.data_frame[4:5]
         bcnt = usb_req.data_frame[5:7]
         ctap_cmd = usb_req.data_frame[7:8]
-        print(int.from_bytes(bcnt, 'big') - 1)
+        logging.getLogger("soft_fido2").info(
+            "ctaphid_cbor RAW frame: cid=%s cmd=0x%02x bcnt=%d ctap_cmd=0x%02x "
+            "frame=%s",
+            self._bytes_to_str(cid), cmd[0], int.from_bytes(bcnt, 'big'),
+            ctap_cmd[0], usb_req.data_frame.hex())
         cbor_data = usb_req.data_frame[8: 7 + int.from_bytes(bcnt, 'big')]
         colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_cbor',
                     msg='CBOR msg frame cmd: {}; bcnt: {}'.format(self._bytes_to_str(ctap_cmd),
@@ -886,43 +946,22 @@ class CTAP2USBIPDevice(USBDevice):
             usb_req: USB request with U2F message
         """
         
-        class U2FCommand(Enum):
-            U2F_VERSION = 0x0
-            U2F_REGISTER = 0x1
-            U2F_AUTHENTICATE = 0x2
-            U2F_VER = 0x03
-        
-        # Only supporting extended length encoding, section 3.1.3
-        # https://fidoalliance.org/specs/fido-u2f-v1.2-ps-20170411/fido-u2f-raw-message-formats-v1.2-ps-20170411.html
         cid = usb_req.data_frame[0:4]
         if cid not in self.cids:
             colour_print(colour=bcolors.FAIL, component='CTAP2USBIPDevice.ctaphid_msg',
                         msg='Unknown CID {}'.format(cid))
         cmd = usb_req.data_frame[4:5]
         bcnt = usb_req.data_frame[5:7]
-        apdu = usb_req.data_frame[7:]
+        apdu = usb_req.data_frame[7:7 + int.from_bytes(bcnt, 'big')]
         colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_msg',
                     msg='cmd = {}; bcnt = {}; apdu = {}'.format(
                         self._bytes_to_str(cmd), self._bytes_to_str(bcnt), apdu))
-        
-        u2f_cla = apdu[:1]
-        u2f_ins = apdu[1:2]
-        u2f_p1 = apdu[2:3]
-        u2f_p2 = apdu[3:4]
-        u2f_lc = apdu[4:7]
-        u2f_data = apdu[7:]
-        colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_msg',
-                    msg='U2F Raw Message CLA = {}; INS = {}; P1 = {}; P2 = {}; Lc = {}'.format(
-                        u2f_cla, u2f_ins, u2f_p1, u2f_p2, u2f_lc))
-        
-        if u2f_cla == b'\x00' and u2f_ins == b'\x03':
-            # U2F_VERSION request, send the expected response
-            cborCmd = CBORCommand(cid, None, skip_init=True)
-            cborCmd.ctaphid_cmd = int.from_bytes(cmd, 'big')
-            cborCmd.bcnt = 6
-            cborCmd.response = list(b'U2F_V2')
-            self.cids[cid]['cborCmd'] = cborCmd
-            self.send_response_segment(cid, self.cids[cid]['cborCmd'])
+        # Keep the official implementation's complete U2F handling, including
+        # the REGISTER/AUTHENTICATE probe Chromium performs before WebAuthn.
+        rsp = CBORCommand(cid, None, skip_init=True)._u2f_req(
+            cid, int.from_bytes(cmd, 'big'), apdu)
+        self.cids[cid]['cborCmd'] = rsp
+        self.send_response_segment(cid, rsp)
     
     def ctaphid_ping(self, usb_req):
         """CTAPHID_PING: Echo data back"""
@@ -1220,6 +1259,20 @@ class USBIPConnection(socketserver.BaseRequestHandler):
     def __init__(self, request=None, client_address=None, server=None):
         super().__init__(request=request, client_address=client_address, server=server)
 
+    def _recv_exact(self, n):
+        """Read exactly n bytes, looping over partial TCP segments.
+
+        Returns b'' if the peer closed before n bytes arrived; raises
+        socket.timeout if the (1s) socket timeout elapses mid-read.
+        """
+        buf = b''
+        while len(buf) < n:
+            chunk = self.request.recv(n - len(buf))
+            if not chunk:
+                return buf
+            buf += chunk
+        return buf
+
     def handle(self):
         endpoint_requests = {}
         colour_print(colour=bcolors.OKBLUE, component='USBIP', msg='New connection from {}'.format(self.client_address))
@@ -1233,8 +1286,11 @@ class USBIPConnection(socketserver.BaseRequestHandler):
         while not usbcontainer.shutdown_event.is_set():
             if not self.attached:
                 try:
-                    data = self.request.recv(8)
+                    data = self._recv_exact(8)
                     if not data:
+                        break
+                    if len(data) < 8:
+                        # peer closed mid-header
                         break
                 except:
                     # Timeout or other error, check shutdown event and continue
@@ -1246,10 +1302,15 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                     colour_print(colour=bcolors.OKBLUE, component='USBIP', msg='Querying device list')
                     self.request.sendall(usbcontainer.handle_device_list().pack())
                 elif req.command == 0x8003:
-                    busid = self.request.recv(5).strip()  # receive bus id
+                    try:
+                        busid = self._recv_exact(5).strip()  # receive bus id
+                        self._recv_exact(27)
+                    except Exception:
+                        colour_print(colour=bcolors.WARNING, component='USBIP',
+                                     msg='incomplete attach request, continuing')
+                        continue
                     colour_print(colour=bcolors.OKBLUE, component='USBIP',
                                  msg='Attaching to device with busid [{}]'.format(busid.decode()))
-                    self.request.recv(27)
                     self.request.sendall(usbcontainer.handle_attach(busid.decode()).pack())
                     self.attached = True
                     self.attachedBusID = busid.decode()
@@ -1263,8 +1324,10 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                     break
                 else:
                     try:
-                        command = self.request.recv(4)
+                        command = self._recv_exact(4)
                         if not command:
+                            break
+                        if len(command) < 4:
                             break
                         colour_print(component='USB/IP', msg='Command received')
                         dump_bytes(command, msg='USB/IP command bytes recieved:')
@@ -1282,7 +1345,12 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                     '''
                     if (cmdVal == 0x00000001):
                         cmd = USBIPCMDSubmit()
-                        data = self.request.recv(cmd.size() - 4)
+                        try:
+                            data = self._recv_exact(cmd.size() - 4)
+                        except Exception:
+                            colour_print(colour=bcolors.WARNING, component='USBIP',
+                                         msg='incomplete submit request, continuing')
+                            continue
                         cmd.unpack(command + data)
                         msg = 'USB/IP Command::\n\tseqnum: {}; devid: {};\n\tdirection: {}; ep: {};\n\tflags: {};'\
                                 'transfer buffer: {};\n\tstart_frame: {}; no. of pkts: {}; '\
@@ -1300,7 +1368,12 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                         if cmd.start_frame == 0xFFFFFFFF and cmd.transfer_flags == 0x0:
                             colour_print(colour=bcolors.OKYELLOW, component='USBIPConnection.handle', msg='CTAPHID:: '\
                                     'FIDO2 Authenticator recieved start_frame, reading rest of data maybe . . .')
-                            data_frame = self.request.recv(cmd.transfer_buffer_length)
+                            try:
+                                data_frame = self._recv_exact(cmd.transfer_buffer_length)
+                            except Exception:
+                                colour_print(colour=bcolors.WARNING, component='USBIP',
+                                             msg='incomplete data frame, continuing')
+                                continue
                             dump_bytes(data_frame, component='USBIPConnection.handle', msg='data bytes recieved:')
                         usb_req = USBRequest(seqnum=cmd.seqnum,
                                              devid=cmd.devid,
@@ -1325,7 +1398,12 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                             break
                     elif(cmdVal == 0x00000002):
                         cmd = USBIPUnlinkReq()
-                        data = self.request.recv(cmd.size())
+                        try:
+                            data = self._recv_exact(cmd.size())
+                        except Exception:
+                            colour_print(colour=bcolors.WARNING, component='USBIP',
+                                         msg='incomplete unlink request, continuing')
+                            continue
                         cmd.unpack(data)
                         dump_bytes(command + cmd.pack(), colour=bcolors.WARNING, component='USBIP', msg='Unlink request')
                         #TODO have we actually sent a USBIP_RET_SUBMIT or not?
