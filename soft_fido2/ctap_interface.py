@@ -1168,6 +1168,11 @@ class CBORCommand(object):
         data = payload + sw
         rsp.response = list(data)
         rsp.bcnt = len(data)
+        # skip_init returns before the instance attributes are initialized, so
+        # response_ready would otherwise fall back to the class-level False.
+        # Multi-frame U2F responses rely on _handle_outgoing checking this
+        # flag to send the remaining continuation segments.
+        rsp.response_ready = True
         return rsp
 
     def _u2f_req(self, cid, cmd_byte: int, apdu: bytes) -> 'CBORCommand':
