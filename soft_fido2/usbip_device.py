@@ -853,10 +853,21 @@ class CTAP2USBIPDevice(USBDevice):
             transaction = context.get('cborCmd')
             if (transaction is not None and transaction.response_ready
                     and len(transaction.response) > 0):
+                logging.getLogger("soft_fido2").info(
+                    "OUTGOING: sending next segment cid=%s remaining=%d",
+                    self._bytes_to_str(cid), len(transaction.response))
                 colour_print(component='CTAP2USBIPDevice._handle_outgoing',
                             msg='Using pending request to send response segment')
                 self.send_response_segment(cid, transaction)
                 return
+        logging.getLogger("soft_fido2").info(
+            "OUTGOING: no ready transaction cids=%s pending=%d",
+            {self._bytes_to_str(c): (ctx.get('cborCmd') is not None,
+                                     ctx.get('cborCmd') is not None and
+                                     getattr(ctx.get('cborCmd'), 'response_ready', False),
+                                     len(getattr(ctx.get('cborCmd'), 'response', []) or []))
+             for c, ctx in self.cids.items()},
+            len(self.pending))
     
     def _handle_incoming_cmd(self, cmd, usb_req):
         """Route CTAPHID commands to appropriate handlers
