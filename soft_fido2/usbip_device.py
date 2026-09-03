@@ -1015,14 +1015,18 @@ class CTAP2USBIPDevice(USBDevice):
 
     def _dispatch_u2f(self, cid, cmd, apdu):
         """Route a complete U2F APDU to the official CTAP engine."""
-        colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_msg',
-                    msg='cmd = {}; bcnt = {}; apdu = {}'.format(
-                        self._bytes_to_str(cmd), len(apdu), apdu))
+        logging.getLogger("soft_fido2").info(
+            "U2F dispatch: cid=%s cmd=0x%02x apdu_len=%d apdu=%s",
+            self._bytes_to_str(cid), cmd[0], len(apdu), apdu.hex())
         # Keep the official implementation's complete U2F handling, including
         # the REGISTER/AUTHENTICATE probe Chromium performs before WebAuthn.
         rsp = CBORCommand(cid, None, skip_init=True)._u2f_req(
             cid, int.from_bytes(cmd, 'big'), apdu)
         self.cids[cid]['cborCmd'] = rsp
+        logging.getLogger("soft_fido2").info(
+            "U2F response ready: cid=%s rsp_len=%d rsp=%s pending=%d",
+            self._bytes_to_str(cid), len(rsp.response),
+            bytes(rsp.response).hex(), len(self.pending))
         self.send_response_segment(cid, rsp)
     
     def ctaphid_ping(self, usb_req):

@@ -30,7 +30,9 @@ class bcolors:
 
 
 def colour_print(colour=bcolors.OKBLUE, component='CTAPHID', msg=''):
-    logging.debug('[' + colour + component + bcolors.ENDC + '] ' + msg)
+    # Use INFO level so protocol diagnostics are visible in production logs;
+    # the authenticator is normally run with INFO logging in the container.
+    logging.info('[' + component + '] ' + re.sub(r'\x1b\[[0-9;]*m', '', msg))
 
 
 class BaseStructure(object):
