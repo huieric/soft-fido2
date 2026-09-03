@@ -739,6 +739,9 @@ class CTAP2USBIPDevice(USBDevice):
         # leave completed responses attached to obsolete CIDs.
         self.cids = {}
         self.pending = []
+        # Partial CTAPHID_MSG (U2F) requests that span more than one 64-byte
+        # HID report. Keyed by channel id.
+        self.u2f_pending = {}
         # The official CBOR engine uses this queue for CTAP responses and
         # keep-alive handling. The UHID transport initializes it in its own
         # constructor; USB/IP must initialize it explicitly as well.
@@ -878,7 +881,18 @@ class CTAP2USBIPDevice(USBDevice):
     def _handle_incoming_sequence(self, cid, usb_req):
         """Handle CTAPHID continuation packets"""
         seqNum = int.from_bytes(usb_req.data_frame[4:5], 'big')
-        
+
+        # A U2F (CTAPHID_MSG) request may span frames; finish it first.
+        if cid in self.u2f_pending:
+            entry = self.u2f_pending[cid]
+            entry['data'] += usb_req.data_frame[5:5 + 59]
+            if len(entry['data']) >= entry['bcnt']:
+                apdu = bytes(entry['data'][:entry['bcnt']])
+                cmd = entry['cmd']
+                del self.u2f_pending[cid]
+                self._dispatch_u2f(cid, cmd, apdu)
+            return
+
         context = self.cids.get(cid)
         if context is None:
             colour_print(colour=bcolors.FAIL,
@@ -986,11 +1000,24 @@ class CTAP2USBIPDevice(USBDevice):
             colour_print(colour=bcolors.FAIL, component='CTAP2USBIPDevice.ctaphid_msg',
                         msg='Unknown CID {}'.format(cid))
         cmd = usb_req.data_frame[4:5]
-        bcnt = usb_req.data_frame[5:7]
-        apdu = usb_req.data_frame[7:7 + int.from_bytes(bcnt, 'big')]
+        bcnt = int.from_bytes(usb_req.data_frame[5:7], 'big')
+        # A single CTAPHID frame carries at most 57 payload bytes after the
+        # 7-byte header (cid|cmd|bcnt). A U2F probe can exceed this and must
+        # be reassembled across continuation frames.
+        first = usb_req.data_frame[7:7 + 57]
+        if bcnt <= len(first):
+            self._dispatch_u2f(cid, cmd, first[:bcnt])
+            return
+        self.u2f_pending[cid] = {'bcnt': bcnt, 'cmd': cmd,
+                                 'data': bytearray(first)}
+        colour_print(colour=bcolors.OKYELLOW, component='CTAP2USBIPDevice.ctaphid_msg',
+                    msg='U2F message spans frames (bcnt={}); waiting for continuation'.format(bcnt))
+
+    def _dispatch_u2f(self, cid, cmd, apdu):
+        """Route a complete U2F APDU to the official CTAP engine."""
         colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_msg',
                     msg='cmd = {}; bcnt = {}; apdu = {}'.format(
-                        self._bytes_to_str(cmd), self._bytes_to_str(bcnt), apdu))
+                        self._bytes_to_str(cmd), len(apdu), apdu))
         # Keep the official implementation's complete U2F handling, including
         # the REGISTER/AUTHENTICATE probe Chromium performs before WebAuthn.
         rsp = CBORCommand(cid, None, skip_init=True)._u2f_req(
