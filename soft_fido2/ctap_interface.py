@@ -1092,23 +1092,21 @@ class CBORCommand(object):
                 list((self.CBORStatusCode.CTAP2_ERR_OPERATION_DENIED).to_bytes(1, 'big'))
             )
         
-        # Headless PIN mode: advertise full CTAP2.1 + resident keys + PIN/UV
-        # support. IBKR's WebAuthn page requires user verification, so the
-        # authenticator must negotiate clientPIN (the PIN itself is provided
-        # by the provisioned wallet in FIDO_HOME).
+        # Headless built-in UV mode: advertise on-device user verification
+        # (like a biometric authenticator) instead of clientPIN. Chromium then
+        # performs UV inside the authenticator via the uv flag instead of
+        # opening a security-key PIN dialog, which is not reliably drivable
+        # inside the embedded JxBrowser. SOFT_FIDO2_SKIP_UP=true caches the
+        # "verified" user state so the uv_required checks pass headlessly.
         result: dict[int, typing.Any] = {
             0x01: ["FIDO_2_1", "FIDO_2_0"],
             0x02: ['hmac-secret'],
             0x03: b"\x00" * 16,
-            0x04: {'rk': True, 'up': True, 'plat': False, 'clientPin': True},
+            0x04: {'rk': True, 'up': True, 'uv': True, 'plat': False},
             0x05: 1200,
         }
-        # Always include pinProtocols so Chromium drives the clientPIN flow
-        # (getKeyAgreement/getPinToken) instead of rejecting the device as
-        # an incompatible legacy authenticator.
-        result[0x06] = [1]
         colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
-                    msg='Returning get_info WITH PIN protocol (headless UV mode)')
+                    msg='Returning get_info with built-in UV (headless mode)')
         
         result_bytes = bytes( (self.CBORStatusCode.CTAP2_OK).to_bytes(1, 'big') + cbor.dumps(result) )
         logging.debug(f"len: {len(result_bytes)}")
@@ -1330,10 +1328,17 @@ class CBORCommand(object):
         pinAuth = req.get(0x06)
         options = req.get(0x05, {})
         uv_required = options.get('uv', False)
-        if uv_required and not pinAuth: # If UV is required but pinAuth is missing, fail
-            colour_print(colour=bcolors.FAIL, component='CBORCommand._get_assertion',
-                        msg='UV required but pinAuth missing')
-            return self._set_rsp_fields(list((self.CBORStatusCode.CTAP2_ERR_PUAT_REQUIRED).to_bytes(1, 'big')))
+        if uv_required and not pinAuth: # If UV is required but pinAuth is missing
+            # Built-in (on-device) UV mode: the authenticator performs user
+            # verification itself, so the client does not send pinUvAuthParam.
+            # SOFT_FIDO2_SKIP_UP caches the verified state in headless mode.
+            if AuthenticatorAPI.get_user_state(self.cid) == "verified":
+                colour_print(colour=bcolors.OKGREEN, component='CBORCommand._get_assertion',
+                            msg='UV satisfied by built-in authenticator verification')
+            else:
+                colour_print(colour=bcolors.FAIL, component='CBORCommand._get_assertion',
+                            msg='UV required but pinAuth missing')
+                return self._set_rsp_fields(list((self.CBORStatusCode.CTAP2_ERR_PUAT_REQUIRED).to_bytes(1, 'big')))
 
         if pinAuth: # If pinAuth is present, validate it
             if not self._verify_pin_token(req.get(0x02), pinAuth):
