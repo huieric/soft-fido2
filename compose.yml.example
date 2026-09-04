@@ -5,15 +5,11 @@ services:
     network_mode: host          # usbip client on the host connects to 127.0.0.1:3240
     restart: unless-stopped
     volumes:
-      # Persists platform.key + registered .passkey/.stash files.
+      # Persists platform.key + the imported passkey file.
       - soft-fido2-data:/run/fido
-      # Same secret is mounted read-only in the IB Gateway container.
-      - ./fido2_pin:/run/secrets/fido2_pin:ro
     environment:
-      FIDO_HOME: /run/fido
       SOFT_FIDO2_PORT: "3240"
-      SOFT_FIDO2_PIN_FILE: /run/secrets/fido2_pin
-      SOFT_FIDO2_WALLET: ibkr
+      SOFT_FIDO2_IMPORT_FILE: /run/fido/ibkr_passkey.txt
 
 volumes:
   soft-fido2-data:

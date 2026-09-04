@@ -72,7 +72,6 @@ services:
     volumes:
       - soft-fido2-data:/run/fido
     environment:
-      FIDO_HOME: /run/fido
       SOFT_FIDO2_PORT: "3240"
 
 volumes:
@@ -85,10 +84,11 @@ docker compose logs -f soft-fido2
 # expect: "Starting the AyeBeKey Passkey USB/IP Service on port 3240"
 ```
 
-> `FIDO_HOME` (`/run/fido`, persisted as a named volume) holds three things the
-> container must keep across restarts:
-> - `platform.key` — generated automatically on first boot
-> - `<name>.passkey` / `<name>.stash` — the registered resident credentials
+> The `FIDO_HOME` directory defaults to `/run/fido` inside the entrypoint, so
+> no env var is required. The persisted volume keeps across restarts:
+> - `platform.key` — generated automatically on first boot (still used by the
+>   platform-assertion fallback)
+> - the imported passkey file (`ibkr_passkey.txt`)
 
 ## Auto-attach as a host USB device (systemd)
 
@@ -211,51 +211,10 @@ The legacy JSON form (`credentialId`, `rpId`, `userHandle`, `privateKeyPem`)
 is also still accepted. See [`docs/IBKR-UNATTENDED.md`](docs/IBKR-UNATTENDED.md)
 for the full end-to-end account of this deployment and the dead-ends we hit.
 
-### Optional FIDO2 PIN for unattended UV
-
-IBKR/JxBrowser may require user verification and display `PIN required`. The
-official authenticator supports CTAP2 `clientPIN`. For unattended operation,
-create one secret file on AWS and mount it read-only into both containers:
-
-```bash
-cd /home/opadmin/run/global_futures/docker/ibkr/soft-fido2
-umask 077
-printf '%s\n' 'your-fido2-pin' > fido2_pin
-chmod 600 fido2_pin
-```
-
-This is the PIN for the software authenticator, not the IBKR, Linux, SSH, or
-Bitwarden password. Never commit or log this file.
-
-For the soft-fido2 compose service:
-
-```yaml
-volumes:
-  - ./fido2_pin:/run/secrets/fido2_pin:ro
-environment:
-  SOFT_FIDO2_PIN_FILE: /run/secrets/fido2_pin
-  SOFT_FIDO2_WALLET: ibkr
-```
-
-For the IB Gateway compose service, mount the same host file:
-
-```yaml
-volumes:
-  - /home/opadmin/run/global_futures/docker/ibkr/soft-fido2/fido2_pin:/run/secrets/fido2_pin:ro
-environment:
-  FIDO2_PIN_FILE: /run/secrets/fido2_pin
-```
-
-The soft-fido2 entrypoint creates an official PIN-protected `ibkr.passkey` /
-`ibkr.stash` wallet on first boot. The IBGA clicker enters the PIN into the
-Chromium security-key dialog with `xdotool`; the PIN value is never logged.
-Existing wallets are not overwritten.
-
 ## Configuration
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
-| `FIDO_HOME` | `/run/fido` | Directory for `platform.key` + `.passkey` files |
 | `SOFT_FIDO2_PORT` | `3240` | USB/IP server port |
 | `SOFT_FIDO2_SKIP_UP` | `true` | Skip the user-presence check (headless) |
 | `SOFT_FIDO2_IMPORT_FILE` | *(unset)* | Path to an imported `bwu fido2 get` passkey file |
