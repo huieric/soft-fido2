@@ -546,7 +546,7 @@ class USBDevice():
                              interval=0x0,
                              padding=0,
                              data_frame=usb_res).pack()
-        dump_bytes(list(rsp), colour=bcolors.FAIL, component='USBDevice(response)', msg='response bytes:')
+        dump_bytes(list(rsp), colour=bcolors.OKBLUE, component='USBDevice(response)', msg='response bytes:')
         assert self.connection is not None, "connection socket lost"
         self.connection.sendall(rsp)
 
@@ -1433,11 +1433,18 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                                          msg='incomplete submit request, continuing')
                             continue
                         cmd.unpack(command + data)
-                        msg = 'USB/IP Command::\n\tseqnum: {}; devid: {};\n\tdirection: {}; ep: {};\n\tflags: {};'\
-                                'transfer buffer: {};\n\tstart_frame: {}; no. of pkts: {}; '\
-                                '\n\tinterval: {}; setup: {}'.format(
-                            cmd.seqnum,cmd.devid,cmd.direction,cmd.ep,cmd.transfer_flags,cmd.transfer_buffer_length,
-                            cmd.start_frame,cmd.number_of_packets,cmd.interval,list((cmd.setup or 0).to_bytes(8, 'big')))
+                        msg = (
+                            'USB/IP Command:\n'
+                            '    seqnum={} devid={}\n'
+                            '    direction={} ep={}\n'
+                            '    flags={} transfer_buffer={}\n'
+                            '    start_frame={} no. of pkts={}\n'
+                            '    interval={} setup={}'
+                        ).format(
+                            cmd.seqnum, cmd.devid, cmd.direction, cmd.ep,
+                            cmd.transfer_flags, cmd.transfer_buffer_length,
+                            cmd.start_frame, cmd.number_of_packets,
+                            cmd.interval, list((cmd.setup or 0).to_bytes(8, 'big')))
                         colour_print(colour=bcolors.OKBLUE, component='USBIPConnection.handle', msg=msg)
                         if endpoint_requests.get(cmd.ep) == None:
                             endpoint_requests[cmd.ep] = 1
@@ -1466,9 +1473,9 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                                              setup=cmd.setup,
                                              cmd_frame=cmd.pack(),
                                              data_frame=data_frame)
-                        dump_bytes(list((usb_req.setup or 0).to_bytes(8, 'big')), colour=bcolors.FAIL,
+                        dump_bytes(list((usb_req.setup or 0).to_bytes(8, 'big')), colour=bcolors.OKBLUE,
                                    component='USBDevice(send_usb_req)', msg='setup bytes:')
-                        dump_bytes(list(usb_req.cmd_frame), list(usb_req.data_frame), colour=bcolors.FAIL, 
+                        dump_bytes(list(usb_req.cmd_frame), list(usb_req.data_frame), colour=bcolors.OKBLUE, 
                                     component='USBDevice(request)', msg='whole received message:')
                         usbcontainer.usb_devices[self.attachedBusID].connection = self.request
                         try:

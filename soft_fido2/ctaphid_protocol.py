@@ -50,7 +50,10 @@ def colour_print(colour=bcolors.OKBLUE, component='CTAPHID', msg=''):
     # and level label are added by the formatter configured in __main__.py.
     level = _COLOUR_LEVELS.get(colour, logging.INFO)
     clean = re.sub(r'\x1b\[[0-9;]*m', '', msg)
-    logging.getLogger('soft_fido2').log(level, '[%s] %s', component, clean)
+    # stacklevel=2 makes %(pathname)s/%(lineno)d point at the real call site
+    # (e.g. usbip_device.py), not at this helper function.
+    logging.getLogger('soft_fido2').log(level, '[%s] %s', component, clean,
+                                        stacklevel=2)
 
 
 class BaseStructure(object):
