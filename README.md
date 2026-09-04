@@ -92,34 +92,25 @@ docker compose logs -f soft-fido2
 
 ## Auto-attach as a host USB device (systemd)
 
-There are **three** service-related files in this repository, but only two are
-for the current Docker/USB/IP deployment. Do not enable both USB/IP attachment
-services at the same time:
+The only systemd unit shipped is `usbip-watchdog.service` (plus its script,
+`usbip-watchdog.sh`). It continuously checks the `vhci-hcd` attachment and
+re-attaches after a reboot, container restart, USB/IP disconnect, or host-side
+device reset — the recommended (and only) configuration for production.
 
-| Unit | Type | Purpose |
-|------|------|---------|
-| `usbip-attach.service` | `oneshot` | Load `vhci-hcd`, wait for port 3240, attach once, and detach on stop. Useful for manual testing. |
-| `usbip-watchdog.service` | long-running | Continuously poll the attachment and re-attach after a reboot, container restart, USB/IP disconnect, or device reset. **Recommended for production.** |
+It checks `usbip port` every 10 seconds, waits for the Docker USB/IP server,
+runs `usbip attach -r 127.0.0.1 -b 1-1.1`, and repairs permissions on
+`/dev/bus/usb` and `/dev/hidraw*` after every attach.
 
-`passkey.service` is the upstream **desktop UHID + Qt system-tray** service. It
-is not used by this Docker/USB/IP deployment and should not be enabled on the
-AWS host. Likewise, `setup_uhid.sh` is only for the upstream desktop UHID
-installation.
+> The previous one-shot `usbip-attach.service` and the upstream desktop UHID
+> units (`passkey.service`, `setup_uhid.sh`, `passkey.env`) have been removed.
+> Use only the watchdog.
 
-The watchdog is the configuration previously used successfully on AWS. It
-checks `usbip port` every 10 seconds, waits for the Docker USB/IP server, runs
-`usbip attach -r 127.0.0.1 -b 1-1.1`, and repairs permissions on `/dev/bus/usb`
-and `/dev/hidraw*` after every attach.
-
-### Recommended: continuous watchdog
+### Install the watchdog
 
 ```bash
 sudo install -m 0755 systemd/usbip-watchdog.sh /usr/local/bin/usbip-watchdog.sh
 sudo install -m 0644 systemd/usbip-watchdog.service /etc/systemd/system/usbip-watchdog.service
 sudo systemctl daemon-reload
-
-# Make sure the one-shot alternative is disabled first.
-sudo systemctl disable --now usbip-attach.service 2>/dev/null || true
 sudo systemctl enable --now usbip-watchdog.service
 sudo systemctl status usbip-watchdog.service
 ```
@@ -146,20 +137,7 @@ Expected messages include:
 [usbip-watchdog] ... attached 1-1.1
 ```
 
-### One-shot alternative: manual/testing mode
-
-```bash
-sudo cp systemd/usbip-attach.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl disable --now usbip-watchdog.service 2>/dev/null || true
-sudo systemctl enable --now usbip-attach.service
-```
-
-This mode attaches only once. It does **not** repair the device if the
-USB/IP connection later dies, and it does not automatically re-attach after a
-container restart. For AWS production use the watchdog above.
-
-Verify either mode:
+Verify:
 
 ```bash
 usbip port          # should show "Port 00: <Port in Use>" for vendor 3713
