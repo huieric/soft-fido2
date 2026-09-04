@@ -18,7 +18,11 @@ fi
 
 # Create the official PIN-protected wallet before starting the USB/IP service.
 # The PIN is read only from a mounted secret and is never printed.
-if [ ! -f "$FIDO_HOME/${SOFT_FIDO2_WALLET:-ibkr}.passkey" ]; then
+#
+# When an external credential is imported (SOFT_FIDO2_IMPORT_FILE), assertions
+# are signed directly from the imported key and no PIN wallet is required, so
+# skip wallet provisioning entirely in that mode.
+if [ -z "${SOFT_FIDO2_IMPORT_FILE:-}" ] && [ ! -f "$FIDO_HOME/${SOFT_FIDO2_WALLET:-ibkr}.passkey" ]; then
     if [ ! -r "${SOFT_FIDO2_PIN_FILE:-/run/secrets/fido2_pin}" ]; then
         echo "[entrypoint] missing PIN secret; cannot create the passkey wallet" >&2
         exit 1

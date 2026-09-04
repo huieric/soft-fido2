@@ -182,22 +182,56 @@ services:
       # - 'c 239:* rwm'        # hidraw major (kernel-dependent; 239 on AWS 6.8)
 ```
 
-## First-time passkey registration
+## First-time passkey provisioning (import a Bitwarden credential)
 
-On the **first** login (or after wiping `FIDO_HOME`), there is no stored
-credential yet. The flow is:
+IBKR enforces a strict `allowList` on `getAssertion`: the authenticator may
+only return a credential whose ID is listed. That list is checked **locally by
+the browser** (and again by the server), so it cannot be bypassed — you cannot
+log in with a credential that IBKR did not issue to this account.
 
-1. IB Gateway prompts for password, then shows the "Second Factor
-   Authentication → Use your Passkey device → Authenticate" dialog.
-2. An auto-clicker in the IB Gateway image clicks **Authenticate**.
-3. The IBKR WebAuthn page performs a resident-key (`makeCredential`) registration
-   against the soft-fido2 authenticator. The new credential is stored in
-   `FIDO_HOME`.
-4. Subsequent logins reuse that credential via `getAssertion`.
+The reliable path is therefore:
 
-> Registration and assertion are fully automatic once the authenticator is
-> reachable; no manual key import is required. The earlier "import a Bitwarden
-> private key" approach is no longer used.
+1. Register a **new passkey** for your IBKR account in Bitwarden (the browser
+   extension intercepts the WebAuthn call and registers with `none`
+   attestation, which IBKR accepts for software/synced passkeys).
+2. Export that passkey with `bwu fido2 get "<entry>"` and keep the raw
+   `key: value` text output (no JSON conversion needed).
+3. Mount the exported file into the container and point `SOFT_FIDO2_IMPORT_FILE`
+   at it (see below).
+
+The authenticator's `_parse_import_file` reads the `key: value` block (with the
+embedded PEM private key), decodes the hyphenated `credentialId` to its 16 raw
+bytes, and signs `getAssertion` when — and only when — the credential is present
+in IBKR's `allowList`.
+
+```yaml
+services:
+  soft-fido2:
+    image: ghcr.io/huieric/soft-fido2:latest
+    volumes:
+      - ./ibkr_passkey.txt:/run/fido/ibkr_passkey.txt:ro
+    environment:
+      SOFT_FIDO2_IMPORT_FILE: /run/fido/ibkr_passkey.txt
+```
+
+The imported file format is the verbatim `bwu fido2 get` output:
+
+```
+name: IBKR-trader
+credentialId: 8f2f1b74-012e-4344-90e6-ff808c1eecd5
+rpId: interactivebrokers.com.hk
+userHandle: 1Ssnr-E_lIGEvjuKztQCLw
+keyType: public-key
+keyCurve: P-256
+privateKey (base64url): MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg...
+-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+```
+
+The legacy JSON form (`credentialId`, `rpId`, `userHandle`, `privateKeyPem`)
+is also still accepted. See [`docs/IBKR-UNATTENDED.md`](docs/IBKR-UNATTENDED.md)
+for the full end-to-end account of this deployment and the dead-ends we hit.
 
 ### Optional FIDO2 PIN for unattended UV
 
@@ -246,6 +280,7 @@ Existing wallets are not overwritten.
 | `FIDO_HOME` | `/run/fido` | Directory for `platform.key` + `.passkey` files |
 | `SOFT_FIDO2_PORT` | `3240` | USB/IP server port |
 | `SOFT_FIDO2_SKIP_UP` | `true` | Skip the user-presence check (headless) |
+| `SOFT_FIDO2_IMPORT_FILE` | *(unset)* | Path to an imported `bwu fido2 get` passkey file |
 | `SOFT_FIDO2_DEBUG_LEVEL` | `INFO` | Log level |
 | `SOFT_FIDO2_LOG_FILE` | *(stdout)* | Log file relative to `FIDO_HOME` |
 

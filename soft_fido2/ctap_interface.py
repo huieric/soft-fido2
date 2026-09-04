@@ -682,10 +682,170 @@ class AuthenticatorAPI(object):
                             msg=f'Could not retrieve key pair from credential id {cred} and platform KeyPair')
                 logging.exception(e, stack_info=True)
                 continue
-        return CBORCommand.CBORStatusCode.CTAP2_ERR_NO_CREDENTIALS, None, None, None, None
+        return cls._maybe_imported_assertion(rpId, clientDataHash, allowedList)
+
+    @classmethod
+    def _parse_import_file(cls, path):
+        """Parse an externally exported passkey file.
+
+        Supports two formats:
+        1. The raw ``bwu fido2 get`` output, a ``key: value`` text block with an
+           embedded PEM private key:
+
+               name: IBKR-trader
+               credentialId: 8f2f1b74-012e-4344-90e6-ff808c1eecd5
+               rpId: interactivebrokers.com.hk
+               userHandle: 1Ssnr-E_lIGEvjuKztQCLw
+               keyType: public-key
+               keyCurve: P-256
+               -----BEGIN PRIVATE KEY-----
+               ...
+               -----END PRIVATE KEY-----
+
+        2. A legacy JSON document with the same fields (credentialId, rpId,
+           userHandle, privateKeyPem).
+
+        Returns a normalised dict with keys: credentialId, rpId, userHandle,
+        privateKeyPem (str). Returns None on any parse failure.
+        """
+        import json
+        try:
+            with open(path, 'r') as f:
+                raw = f.read()
+        except Exception:
+            return None
+
+        # Legacy JSON format.
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict) and data.get('privateKeyPem'):
+                return data
+        except Exception:
+            pass
+
+        # ``key: value`` text format (bwu fido2 get).
+        kv = {}
+        pem_lines = []
+        in_pem = False
+        for line in raw.splitlines():
+            if '-----BEGIN' in line:
+                in_pem = True
+                pem_lines.append(line)
+                continue
+            if '-----END' in line:
+                pem_lines.append(line)
+                in_pem = False
+                continue
+            if in_pem:
+                pem_lines.append(line)
+                continue
+            if ':' in line:
+                key, _, val = line.partition(':')
+                kv[key.strip()] = val.strip()
+
+        if pem_lines:
+            kv['privateKeyPem'] = '\n'.join(pem_lines)
+        else:
+            # No PEM block; fall back to the base64url DER field if present.
+            for alt in ('privateKey (base64url)', 'privateKey', 'privateKeyBase64Url'):
+                if alt in kv:
+                    try:
+                        raw_der = base64.urlsafe_b64decode(
+                            kv[alt] + '=' * (-len(kv[alt]) % 4))
+                        from cryptography.hazmat.primitives import serialization as _ser
+                        kv['privateKeyPem'] = _ser.load_der_private_key(
+                            raw_der, password=None).private_bytes(
+                                _ser.Encoding.PEM,
+                                _ser.PrivateFormat.PKCS8,
+                                _ser.NoEncryption()).decode()
+                        break
+                    except Exception:
+                        continue
+
+        if not kv.get('credentialId') or not kv.get('rpId') or not kv.get('privateKeyPem'):
+            return None
+        return kv
+
+    @classmethod
+    def _maybe_imported_assertion(cls, rpId, clientDataHash, allowedList):
+        """Sign with a credential imported from an external passkey file
+        (e.g. exported from Bitwarden via ``bwu fido2 get``).
+
+        The file (default /run/secrets/ibkr_passkey.json) holds:
+            credentialId, rpId, userHandle, privateKeyPem
+
+        An imported credential is only usable when the relying party's
+        allowList is empty (discoverable flow) or explicitly lists its
+        credential id.
+        """
+        path = os.environ.get('SOFT_FIDO2_IMPORT_FILE',
+                              '/run/secrets/ibkr_passkey.json')
+        data = cls._parse_import_file(path)
+        if not data:
+            return None, None, None, None, None
+
+        if data.get('rpId') != rpId:
+            return None, None, None, None, None
+
+        # Decode the credential id (Bitwarden stores a hyphenated UUID).
+        cred_id_str = data.get('credentialId', '')
+        try:
+            if '-' in cred_id_str:
+                import uuid as _uuid
+                cred_id = _uuid.UUID(cred_id_str).bytes
+            else:
+                cred_id = base64.urlsafe_b64decode(
+                    cred_id_str + '=' * (-len(cred_id_str) % 4))
+        except Exception:
+            return None, None, None, None, None
+
+        # Strict allowList enforcement: the returned credential must be listed
+        # unless the relying party issued a discoverable request (empty list).
+        if allowedList:
+            allowed_ids = {c.get('id') for c in allowedList}
+            if cred_id not in allowed_ids:
+                logging.getLogger('soft_fido2').info(
+                    'imported credential %s not in allowList (%d entries)',
+                    cred_id.hex()[:16], len(allowedList))
+                return None, None, None, None, None
+
+        # Load the private key and sign.
+        from cryptography.hazmat.primitives import serialization as _ser
+        try:
+            priv = _ser.load_pem_private_key(
+                data['privateKeyPem'].encode(), password=None)
+        except Exception as e:
+            logging.getLogger('soft_fido2').warning(
+                'imported private key failed to load: %s', e)
+            return None, None, None, None, None
+
+        rp_id_hash = hashes.Hash(hashes.SHA256())
+        rp_id_hash.update(rpId.encode())
+        rp_id_hash = rp_id_hash.finalize()
+        # UP (0x01) | UV (0x04): built-in UV headless mode.
+        auth_data = rp_id_hash + b'\x05' + b'\x00\x00\x00\x01'
+        signature = priv.sign(auth_data + clientDataHash,
+                               ec.ECDSA(hashes.SHA256()))
+        credential = {'id': cred_id, 'type': 'public-key'}
+        user_handle = None
+        uh = data.get('userHandle', '')
+        if uh:
+            try:
+                user_handle = base64.urlsafe_b64decode(
+                    uh + '=' * (-len(uh) % 4))
+            except Exception:
+                user_handle = None
+        logging.getLogger('soft_fido2').info(
+            'assertion signed with imported credential %s...', cred_id.hex()[:16])
+        return None, credential, auth_data, signature, user_handle
 
     @classmethod
     def assertion_out(cls, rpId, clientDataHash, allowedList, exts, cid):
+        ## Imported passkey (e.g. Bitwarden export): try first so an
+        ## explicitly provisioned external credential wins over platform keys.
+        imported = cls._maybe_imported_assertion(rpId, clientDataHash, allowedList)
+        if imported is not None and imported[1] is not None:
+            return imported
         if cid in cls._open_keys.keys() and isinstance(cls._open_keys[cid].get('kp'), KeyPair): ## Try return a res cred assertion
             passkey = cls._open_keys[cid]
             ca_x5c = passkey.get('x5c')
@@ -1102,11 +1262,16 @@ class CBORCommand(object):
             0x01: ["FIDO_2_1", "FIDO_2_0"],
             0x02: ['hmac-secret'],
             0x03: b"\x00" * 16,
-            0x04: {'rk': True, 'up': True, 'uv': True, 'plat': False},
+            # plat: True advertises a platform authenticator. IBKR's web login
+            # sends allowCredentials with transports: ["internal"], which makes
+            # strict browsers (Firefox) refuse to route the request to a
+            # cross-platform USB authenticator (SecurityError). Advertising
+            # plat: True makes the request reach us over USB anyway.
+            0x04: {'rk': True, 'up': True, 'uv': True, 'plat': True},
             0x05: 1200,
         }
         colour_print(colour=bcolors.OKBLUE, component='CBORCommand._get_info',
-                    msg='Returning get_info with built-in UV (headless mode)')
+                    msg='Returning get_info with built-in UV + platform (headless mode)')
         
         result_bytes = bytes( (self.CBORStatusCode.CTAP2_OK).to_bytes(1, 'big') + cbor.dumps(result) )
         logging.debug(f"len: {len(result_bytes)}")
