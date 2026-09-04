@@ -174,22 +174,29 @@ The reliable path is therefore:
    attestation, which IBKR accepts for software/synced passkeys).
 2. Export that passkey with `bwu fido2 get "<entry>"` and keep the raw
    `key: value` text output (no JSON conversion needed).
-3. Mount the exported file into the container and point `SOFT_FIDO2_IMPORT_FILE`
-   at it (see below).
+3. Mount the exported file(s) into the container and point `SOFT_FIDO2_IMPORT_DIR`
+   at the directory (or `SOFT_FIDO2_IMPORT_FILE` at a single file / comma-separated
+   list). See below.
 
-The authenticator's `_parse_import_file` reads the `key: value` block (with the
+The authenticator's `_parse_import_file` reads each `key: value` block (with the
 embedded PEM private key), decodes the hyphenated `credentialId` to its 16 raw
 bytes, and signs `getAssertion` when — and only when — the credential is present
 in IBKR's `allowList`.
+
+**Multiple passkeys / multiple accounts**: soft-fido2 can serve several IBKR
+accounts from one authenticator. Put one `bwu fido2 get` export per account in a
+directory and point `SOFT_FIDO2_IMPORT_DIR` at it. On each `getAssertion`, it
+picks the imported credential whose `rpId` matches and whose id is listed in that
+account's `allowList`.
 
 ```yaml
 services:
   soft-fido2:
     image: ghcr.io/huieric/soft-fido2:latest
     volumes:
-      - ./ibkr_passkey.txt:/run/fido/ibkr_passkey.txt:ro
+      - ./passkeys:/run/fido/passkeys:ro   # one file per IBKR account
     environment:
-      SOFT_FIDO2_IMPORT_FILE: /run/fido/ibkr_passkey.txt
+      SOFT_FIDO2_IMPORT_DIR: /run/fido/passkeys
 ```
 
 The imported file format is the verbatim `bwu fido2 get` output:
@@ -217,7 +224,8 @@ for the full end-to-end account of this deployment and the dead-ends we hit.
 |---------|---------|---------|
 | `SOFT_FIDO2_PORT` | `3240` | USB/IP server port |
 | `SOFT_FIDO2_SKIP_UP` | `true` | Skip the user-presence check (headless) |
-| `SOFT_FIDO2_IMPORT_FILE` | *(unset)* | Path to an imported `bwu fido2 get` passkey file |
+| `SOFT_FIDO2_IMPORT_DIR` | *(unset)* | Directory of imported `bwu fido2 get` passkey files (one per account) |
+| `SOFT_FIDO2_IMPORT_FILE` | *(unset)* | Single imported passkey file, or comma-separated list of files |
 | `SOFT_FIDO2_DEBUG_LEVEL` | `INFO` | Log level |
 | `SOFT_FIDO2_LOG_FILE` | *(stdout)* | Log file relative to `FIDO_HOME` |
 

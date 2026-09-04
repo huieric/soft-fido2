@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See [`docs/IBKR-UNATTENDED.md`](docs/IBKR-UNATTENDED.md) for the full account.
 
+#### Multiple imported passkeys (2026-09-04)
+
+- `SOFT_FIDO2_IMPORT_DIR` loads every regular file in a directory as an imported
+  passkey, so a single authenticator can serve several IBKR accounts.
+- `SOFT_FIDO2_IMPORT_FILE` now also accepts a comma-separated list of paths.
+- `_maybe_imported_assertion` picks the first imported credential whose `rpId`
+  matches and whose id is in the incoming `allowList` (or the first matching
+  credential for a discoverable / empty-list request).
+
 ---
 
 ### ⚠️ BREAKING CHANGES

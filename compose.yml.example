@@ -5,11 +5,14 @@ services:
     network_mode: host          # usbip client on the host connects to 127.0.0.1:3240
     restart: unless-stopped
     volumes:
-      # Persists platform.key + the imported passkey file.
+      # Persists platform.key + the imported passkey files.
       - soft-fido2-data:/run/fido
     environment:
       SOFT_FIDO2_PORT: "3240"
-      SOFT_FIDO2_IMPORT_FILE: /run/fido/ibkr_passkey.txt
+      # Directory of one or more `bwu fido2 get` passkey exports. Every regular
+      # file in this directory is treated as an imported credential, so you can
+      # serve several IBKR accounts from the single authenticator.
+      SOFT_FIDO2_IMPORT_DIR: /run/fido/passkeys
 
 volumes:
   soft-fido2-data:

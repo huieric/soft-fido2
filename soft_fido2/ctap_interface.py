@@ -767,56 +767,138 @@ class AuthenticatorAPI(object):
         return kv
 
     @classmethod
-    def _maybe_imported_assertion(cls, rpId, clientDataHash, allowedList):
-        """Sign with a credential imported from an external passkey file
-        (e.g. exported from Bitwarden via ``bwu fido2 get``).
-
-        The file (default /run/secrets/ibkr_passkey.txt) holds:
-            credentialId, rpId, userHandle, privateKeyPem
-
-        An imported credential is only usable when the relying party's
-        allowList is empty (discoverable flow) or explicitly lists its
-        credential id.
-        """
-        path = os.environ.get('SOFT_FIDO2_IMPORT_FILE',
-                              '/run/secrets/ibkr_passkey.txt')
-        data = cls._parse_import_file(path)
-        if not data:
-            return None, None, None, None, None
-
-        if data.get('rpId') != rpId:
-            return None, None, None, None, None
-
-        # Decode the credential id (Bitwarden stores a hyphenated UUID).
-        cred_id_str = data.get('credentialId', '')
+    def _decode_credential_id(cls, cred_id_str):
+        """Decode a Bitwarden-style credential id to its raw bytes."""
         try:
             if '-' in cred_id_str:
                 import uuid as _uuid
-                cred_id = _uuid.UUID(cred_id_str).bytes
-            else:
-                cred_id = base64.urlsafe_b64decode(
-                    cred_id_str + '=' * (-len(cred_id_str) % 4))
+                return _uuid.UUID(cred_id_str).bytes
+            return base64.urlsafe_b64decode(
+                cred_id_str + '=' * (-len(cred_id_str) % 4))
         except Exception:
+            return None
+
+    @classmethod
+    def _iter_import_paths(cls):
+        """Yield passkey export file paths from the import configuration.
+
+        Resolution order:
+        1. ``SOFT_FIDO2_IMPORT_DIR`` — a directory whose regular files are all
+           treated as passkey exports.
+        2. ``SOFT_FIDO2_IMPORT_FILE`` — one path, or a comma-separated list of
+           paths; a directory entry is expanded to its regular files.
+        Falls back to ``/run/secrets/ibkr_passkey.txt``.
+        """
+        dirval = os.environ.get('SOFT_FIDO2_IMPORT_DIR')
+        fileval = os.environ.get('SOFT_FIDO2_IMPORT_FILE')
+
+        def _expand(path):
+            if os.path.isdir(path):
+                for name in sorted(os.listdir(path)):
+                    full = os.path.join(path, name)
+                    if os.path.isfile(full):
+                        yield full
+            elif os.path.isfile(path):
+                yield path
+
+        if dirval:
+            yield from _expand(dirval)
+            return
+        if fileval:
+            for part in fileval.split(','):
+                part = part.strip()
+                if part:
+                    yield from _expand(part)
+            return
+        yield from _expand('/run/secrets/ibkr_passkey.txt')
+
+    @classmethod
+    def _load_imported_credentials(cls):
+        """Load all imported passkey credentials into normalised dicts.
+
+        Returns a list of dicts with keys: ``credentialId`` (raw bytes),
+        ``rpId``, ``userHandle`` (raw bytes or None), ``privateKeyPem`` (str),
+        ``path`` (str). De-duplicated on ``(rpId, credentialId)``.
+        """
+        creds = []
+        seen = set()
+        log = logging.getLogger('soft_fido2')
+        for path in cls._iter_import_paths():
+            data = cls._parse_import_file(path)
+            if not data:
+                continue
+            cred_id = cls._decode_credential_id(data.get('credentialId', ''))
+            if cred_id is None:
+                log.warning('imported credential %s has invalid credentialId', path)
+                continue
+            if not data.get('rpId') or not data.get('privateKeyPem'):
+                continue
+            key = (data.get('rpId'), cred_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            user_handle = None
+            uh = data.get('userHandle', '')
+            if uh:
+                try:
+                    user_handle = base64.urlsafe_b64decode(
+                        uh + '=' * (-len(uh) % 4))
+                except Exception:
+                    user_handle = None
+            creds.append({
+                'credentialId': cred_id,
+                'rpId': data.get('rpId'),
+                'userHandle': user_handle,
+                'privateKeyPem': data.get('privateKeyPem'),
+                'path': path,
+            })
+        return creds
+
+    @classmethod
+    def _maybe_imported_assertion(cls, rpId, clientDataHash, allowedList):
+        """Sign ``getAssertion`` with the first imported credential that matches.
+
+        Soft-fido2 may hold several imported passkeys (e.g. one per IBKR
+        account). The relying party's ``allowList`` identifies which credential
+        it expects, so pick the first imported credential whose rpId matches
+        and whose id is present in the allowList. For a discoverable request
+        (empty allowList), return the first rpId-matching credential.
+        """
+        log = logging.getLogger('soft_fido2')
+        creds = cls._load_imported_credentials()
+        if not creds:
             return None, None, None, None, None
 
-        # Strict allowList enforcement: the returned credential must be listed
-        # unless the relying party issued a discoverable request (empty list).
-        if allowedList:
-            allowed_ids = {c.get('id') for c in allowedList}
-            if cred_id not in allowed_ids:
-                logging.getLogger('soft_fido2').info(
-                    'imported credential %s not in allowList (%d entries)',
-                    cred_id.hex()[:16], len(allowedList))
-                return None, None, None, None, None
+        rp_creds = [c for c in creds if c['rpId'] == rpId]
+        if not rp_creds:
+            return None, None, None, None, None
 
+        allowed_ids = {c.get('id') for c in allowedList} if allowedList else None
+
+        chosen = None
+        if allowed_ids is not None:
+            for c in rp_creds:
+                if c['credentialId'] in allowed_ids:
+                    chosen = c
+                    break
+            if chosen is None:
+                log.info(
+                    'no imported credential matches allowList for rpId %s '
+                    '(have %d credential(s), allowList has %d)',
+                    rpId, len(rp_creds), len(allowed_ids))
+                return None, None, None, None, None
+        else:
+            chosen = rp_creds[0]
+
+        cred_id = chosen['credentialId']
         # Load the private key and sign.
         from cryptography.hazmat.primitives import serialization as _ser
         try:
             priv = _ser.load_pem_private_key(
-                data['privateKeyPem'].encode(), password=None)
+                chosen['privateKeyPem'].encode(), password=None)
         except Exception as e:
-            logging.getLogger('soft_fido2').warning(
-                'imported private key failed to load: %s', e)
+            log.warning('imported private key failed to load (%s): %s',
+                        chosen['path'], e)
             return None, None, None, None, None
 
         rp_id_hash = hashes.Hash(hashes.SHA256())
@@ -827,17 +909,9 @@ class AuthenticatorAPI(object):
         signature = priv.sign(auth_data + clientDataHash,
                                ec.ECDSA(hashes.SHA256()))
         credential = {'id': cred_id, 'type': 'public-key'}
-        user_handle = None
-        uh = data.get('userHandle', '')
-        if uh:
-            try:
-                user_handle = base64.urlsafe_b64decode(
-                    uh + '=' * (-len(uh) % 4))
-            except Exception:
-                user_handle = None
-        logging.getLogger('soft_fido2').info(
-            'assertion signed with imported credential %s...', cred_id.hex()[:16])
-        return None, credential, auth_data, signature, user_handle
+        log.info('assertion signed with imported credential %s (rpId=%s)',
+                 cred_id.hex()[:16], rpId)
+        return None, credential, auth_data, signature, chosen['userHandle']
 
     @classmethod
     def assertion_out(cls, rpId, clientDataHash, allowedList, exts, cid):
