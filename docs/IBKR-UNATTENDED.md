@@ -58,7 +58,7 @@ IBKR 下发的 `getAssertion` 请求里带一个 `allowList`（允许的凭据 I
    缓存 "verified" 状态，绕过 PIN。UV 协商成功，`getAssertion` 到达。
 
 4. **凭据不匹配（关键卡点）**：IBKR 下发的 allowList 只含 Windows Hello 凭据
-   `1024e6e7...`，而本地的 Bitwarden 凭据 `b09a21fd...` 不在列表里 →
+   `1024xxxx...`，而本地的 Bitwarden 凭据 `b09axxxx...` 不在列表里 →
    `NO_CREDENTIALS` → "Try a different security key"。
 
 5. **试图强行返回 Bitwarden 凭据**：加了 `SOFT_FIDO2_IMPORT_IGNORE_ALLOWLIST`
@@ -82,7 +82,7 @@ IBKR 下发的 `getAssertion` 请求里带一个 `allowList`（允许的凭据 I
 3. 挂载该文件到 soft-fido2，设置 `SOFT_FIDO2_IMPORT_FILE`。认证器解析
    `key: value` 文本（含内嵌 PEM 私钥），把带连字符的 `credentialId` 解码为
    16 字节，凭据出现在 allowList 里时签名 `getAssertion`。
-4. 新凭据 `8f2f1b74-012e-4344-90e6-ff808c1eecd5` 现在出现在 allowList 里 →
+4. 新凭据 `01234567-89ab-cdef-0123-456789abcdef` 现在出现在 allowList 里 →
    严格匹配 → 签名 → 登录成功。
 
 验证标志（IB Gateway 日志）：
@@ -108,15 +108,15 @@ Connected to cdc1.ibllc.com:4000
 ## 6. 凭据文件格式（`bwu fido2 get` 原文）
 
 ```
-name: IBKR-trader
-credentialId: 8f2f1b74-012e-4344-90e6-ff808c1eecd5
+name: example-ibkr
+credentialId: 01234567-89ab-cdef-0123-456789abcdef
 rpId: interactivebrokers.com.hk
-userHandle: 1Ssnr-E_lIGEvjuKztQCLw
+userHandle: <redacted>
 keyType: public-key
 keyCurve: P-256
-privateKey (base64url): MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg...
+privateKey (base64url): <redacted>
 -----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg...
+<redacted>
 -----END PRIVATE KEY-----
 ```
 

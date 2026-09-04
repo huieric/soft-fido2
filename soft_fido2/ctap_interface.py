@@ -692,14 +692,14 @@ class AuthenticatorAPI(object):
         1. The raw ``bwu fido2 get`` output, a ``key: value`` text block with an
            embedded PEM private key:
 
-               name: IBKR-trader
-               credentialId: 8f2f1b74-012e-4344-90e6-ff808c1eecd5
+               name: example-ibkr
+               credentialId: 01234567-89ab-cdef-0123-456789abcdef
                rpId: interactivebrokers.com.hk
-               userHandle: 1Ssnr-E_lIGEvjuKztQCLw
+               userHandle: QUJDREVGR0hJSktMTU5PUFFSUw
                keyType: public-key
                keyCurve: P-256
                -----BEGIN PRIVATE KEY-----
-               ...
+               <redacted>
                -----END PRIVATE KEY-----
 
         2. A legacy JSON document with the same fields (credentialId, rpId,
@@ -771,7 +771,7 @@ class AuthenticatorAPI(object):
         """Sign with a credential imported from an external passkey file
         (e.g. exported from Bitwarden via ``bwu fido2 get``).
 
-        The file (default /run/secrets/ibkr_passkey.json) holds:
+        The file (default /run/secrets/ibkr_passkey.txt) holds:
             credentialId, rpId, userHandle, privateKeyPem
 
         An imported credential is only usable when the relying party's
@@ -779,7 +779,7 @@ class AuthenticatorAPI(object):
         credential id.
         """
         path = os.environ.get('SOFT_FIDO2_IMPORT_FILE',
-                              '/run/secrets/ibkr_passkey.json')
+                              '/run/secrets/ibkr_passkey.txt')
         data = cls._parse_import_file(path)
         if not data:
             return None, None, None, None, None
