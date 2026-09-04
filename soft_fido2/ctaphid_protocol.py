@@ -29,10 +29,28 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
+# Map colour classes to log levels so failures surface as ERROR and warnings
+# as WARNING, while routine protocol diagnostics stay at INFO. This keeps the
+# level label honest and lets an operator filter logs at a glance.
+_COLOUR_LEVELS = {
+    bcolors.FAIL: logging.ERROR,
+    bcolors.WARNING: logging.WARNING,
+    bcolors.OKYELLOW: logging.WARNING,
+    bcolors.OKGREEN: logging.INFO,
+    bcolors.OKBLUE: logging.INFO,
+    bcolors.OKPINK: logging.INFO,
+    bcolors.OKPURPLE: logging.INFO,
+}
+
+
 def colour_print(colour=bcolors.OKBLUE, component='CTAPHID', msg=''):
-    # Use INFO level so protocol diagnostics are visible in production logs;
-    # the authenticator is normally run with INFO logging in the container.
-    logging.info('[' + component + '] ' + re.sub(r'\x1b\[[0-9;]*m', '', msg))
+    # Route every diagnostic through a single "soft_fido2" logger with lazy
+    # %-formatting. ANSI escapes are stripped because container logs are not
+    # attached to a TTY (they would show as raw control codes). The timestamp
+    # and level label are added by the formatter configured in __main__.py.
+    level = _COLOUR_LEVELS.get(colour, logging.INFO)
+    clean = re.sub(r'\x1b\[[0-9;]*m', '', msg)
+    logging.getLogger('soft_fido2').log(level, '[%s] %s', component, clean)
 
 
 class BaseStructure(object):

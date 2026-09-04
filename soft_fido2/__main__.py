@@ -165,12 +165,16 @@ Examples:
         logFile = os.path.join(
                             os.environ["FIDO_HOME"], os.environ["SOFT_FIDO2_LOG_FILE"])
     
-    logging.basicConfig(level=ll, format='%(message)s', filename=logFile)
+    logging.basicConfig(
+        level=ll,
+        format='%(asctime)s %(levelname)-8s %(name)s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        filename=logFile,
+    )
     
     # Start appropriate transport
     if args.transport == 'uhid':
         logging.info("Starting the AyeBeKey Passkey UHID Service")
-        print("Starting the AyeBeKey Passkey UHID Service")
         
         # Create and start device manager
         device_manager = DeviceManager('/dev/uhid')
@@ -192,8 +196,7 @@ Examples:
             _ = device_manager.stop_device(timeout=5)
     
     elif args.transport == 'usbip':
-        logging.info("Starting the AyeBeKey Passkey USB/IP Service")
-        print(f"Starting the AyeBeKey Passkey USB/IP Service on port {args.port}")
+        logging.info("Starting the AyeBeKey Passkey USB/IP Service on port %d", args.port)
         print("Vendor ID: 0x3713, Product ID: 0x3713")
         print(f"Waiting for USB/IP client connection on port {args.port}...")
         print("\nOn CLIENT machine, run:")

@@ -39,6 +39,7 @@ from enum import Enum
 def print_bytes(*args):
     result = ""
     count = 0
+    log = logging.getLogger('soft_fido2')
     for ba in args:
         for x in ba:
             result += "%02X " % x
@@ -46,10 +47,10 @@ def print_bytes(*args):
             if count == 8 :
                 result += " "
             elif count == 16:
-                print("\t" + result)
+                log.debug("    %s", result)
                 result = ""
                 count = 0
-    print('\t' + result + '\n')
+    log.debug("    %s", result)
 
 def dump_bytes(*args, colour=bcolors.OKPURPLE, component='USB/IP CONTROLLER', msg=''):
     #Print bytes in nice format
@@ -601,10 +602,10 @@ class USBDevice():
         control_req = StandardDeviceRequest()
         control_req.unpack(usb_req.setup.to_bytes(8, 'big'))
         handled = False
-        print('[' + bcolors.OKBLUE + 'USBDevice(handle_usb_control)' + bcolors.ENDC + "] UC Request Type" + \
-                " {}; UC Request {}; UC Value  {}; UCIndex  {}; UC Length {}".format(
-                control_req.bmRequestType, control_req.bRequest, control_req.wValue, control_req.wIndex,
-                control_req.wLength))
+        colour_print(colour=bcolors.OKBLUE, component='USBDevice.handle_usb_control',
+                     msg='UC Request Type {}; UC Request {}; UC Value {}; UC Index {}; UC Length {}'.format(
+                         control_req.bmRequestType, control_req.bRequest, control_req.wValue,
+                         control_req.wIndex, control_req.wLength))
         if control_req.bmRequestType == 0x80: # Host Request
             if control_req.bRequest == 0x06: # Get Descriptor
                 handled = self.handle_get_descriptor(control_req, usb_req)
@@ -621,16 +622,16 @@ class USBDevice():
     def handle_usb_request(self, usb_req):
         try:
             if usb_req.ep == 0:
-                print('[' + bcolors.OKBLUE + 'USBDevice(handle_usb_request)' + bcolors.ENDC + '] Control request')
+                colour_print(colour=bcolors.OKBLUE, component='USBDevice.handle_usb_request',
+                             msg='Control request')
                 self.handle_usb_control(usb_req)
             else:
-                print('[' + bcolors.OKBLUE + 'USBDevice(handle_usb_request)' + bcolors.ENDC + \
-                        '] Data request for ep {}'.format(usb_req.ep))
+                colour_print(colour=bcolors.OKBLUE, component='USBDevice.handle_usb_request',
+                             msg='Data request for ep {}'.format(usb_req.ep))
                 self.handle_data(usb_req)
         except Exception as e:
-            print(e)
-            traceback.print_exc()
-            raise e
+            logging.getLogger('soft_fido2').exception('USB request handling failed: %s', e)
+            raise
 
 
 # ============================================================================
@@ -776,26 +777,27 @@ class CTAP2USBIPDevice(USBDevice):
         if control_req.bmRequestType == 0x81:  # Interface request
             if control_req.bRequest == 0x6:  # Get Descriptor
                 if (control_req.wValue >> 8) == 0x22:  # HID Report descriptor
-                    print('[' + bcolors.OKGREEN + 'CTAP2USBIPDevice' + bcolors.ENDC + 
-                          '] Send initial report ')
+                    colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.handle_usb_control',
+                                 msg='Send initial HID report descriptor')
                     ret = self.generate_fido2_report()
                     self.send_usb_req(ret, len(ret), seqnum=usb_req.seqnum)
                     handled = True
         elif control_req.bmRequestType == 0x21:  # Host Request
             if control_req.bRequest == 0x0a:  # set idle
-                print('[' + bcolors.OKGREEN + 'CTAP2USBIPDevice' + bcolors.ENDC + '] HID Idle ')
+                colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.handle_usb_control',
+                             msg='Set idle')
                 self.send_usb_req(b'', 0, seqnum=usb_req.seqnum)
                 handled = True
         else:
-            print('[' + bcolors.FAIL + 'CTAP2USBIPDevice' + bcolors.ENDC + 
-                  '] Unknown control [{}] '.format(
-                      ', '.join(hex(x) for x in list(usb_req.setup.to_bytes(8, 'big')))))
-            print('[' + bcolors.FAIL + 'CTAP2USBIPDevice' + bcolors.ENDC + 
-                  '] Unknown flags [{}] '.format(
-                      ', '.join(hex(x) for x in list(usb_req.flags.to_bytes(8, 'big')))))
-            print('[' + bcolors.FAIL + 'CTAP2USBIPDevice' + bcolors.ENDC + 
-                  '] Unknown data [{}] '.format(
-                      ', '.join(hex(x) for x in list(usb_req.data_frame))))
+            colour_print(colour=bcolors.FAIL, component='CTAP2USBIPDevice.handle_usb_control',
+                         msg='Unknown control [{}]'.format(
+                             ', '.join(hex(x) for x in list(usb_req.setup.to_bytes(8, 'big')))))
+            colour_print(colour=bcolors.FAIL, component='CTAP2USBIPDevice.handle_usb_control',
+                         msg='Unknown flags [{}]'.format(
+                             ', '.join(hex(x) for x in list(usb_req.flags.to_bytes(8, 'big')))))
+            colour_print(colour=bcolors.FAIL, component='CTAP2USBIPDevice.handle_usb_control',
+                         msg='Unknown data [{}]'.format(
+                             ', '.join(hex(x) for x in list(usb_req.data_frame))))
             self.send_usb_req(b"\x01\x00", 2, seqnum=usb_req.seqnum)
         return handled
     
@@ -831,7 +833,7 @@ class CTAP2USBIPDevice(USBDevice):
             return self._handle_incoming_cmd(cmd, usb_req)
         else:  # Sequence frame
             colour_print(colour=bcolors.OKPURPLE, component='CTAP2USBIPDevice._handle_incoming',
-                        msg='Recieved a sequence segment, appending it to the current msg context')
+                        msg='Received a sequence segment, appending it to the current msg context')
             return self._handle_incoming_sequence(cid, usb_req)
     
     def _handle_outgoing(self, usb_req):
@@ -878,7 +880,7 @@ class CTAP2USBIPDevice(USBDevice):
         """
         ctapCmd = int.from_bytes(cmd, 'big') & 0x7F
         colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice._handle_incoming_cmd',
-                    msg='recieved command {}'.format(ctapCmd))
+                    msg='received command {}'.format(ctapCmd))
         return {
             1: self.ctaphid_ping,
             3: self.ctaphid_msg,
@@ -970,7 +972,7 @@ class CTAP2USBIPDevice(USBDevice):
         
         cid = usb_req.data_frame[0:4]
         colour_print(colour=bcolors.OKGREEN, component='CTAP2USBIPDevice.ctaphid_cbor',
-                    msg='CBOR message recieved on channel {}'.format(self._bytes_to_str(cid)))
+                    msg='CBOR message received on channel {}'.format(self._bytes_to_str(cid)))
         cmd = usb_req.data_frame[4:5]
         bcnt = usb_req.data_frame[5:7]
         ctap_cmd = usb_req.data_frame[7:8]
@@ -1059,7 +1061,7 @@ class CTAP2USBIPDevice(USBDevice):
     def ctaphid_unknown(self, usb_req):
         """Handle unknown CTAPHID commands"""
         colour_print(colour=bcolors.FAIL, component='CTAP2USBIPDevice.ctaphid_unknown',
-                    msg='Unkown request recieved')
+                    msg='Unknown request received')
         self.send_usb_req(b'', 0, ep=usb_req.ep, seqnum=usb_req.seqnum)
     
     # ========================================================================
@@ -1164,7 +1166,7 @@ class CTAP2USBIPDevice(USBDevice):
                 wait_time = now - start
                 if (now >= start + 450) and not self.stop:  # If we get to 45ms, send heartbeat
                     colour_print(colour=bcolors.FAIL, component='KeepAliveWorker.reply_with_keepalive',
-                                msg='Thread reached timeout of {} ms before response buffer was recieved . . . sending heartbeat response'.format(wait_time))
+                                msg='Thread reached timeout of {} ms before response buffer was received . . . sending heartbeat response'.format(wait_time))
                     # Reply with keep alive after 50ms (45ms gives tolerance)
                     # Status is always still processing
                     rsp = b'\x3B\x01\x01'
@@ -1409,7 +1411,7 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                         if len(command) < 4:
                             break
                         colour_print(component='USB/IP', msg='Command received')
-                        dump_bytes(command, msg='USB/IP command bytes recieved:')
+                        dump_bytes(command, msg='USB/IP command bytes received:')
                         cmdVal = struct.unpack('>I', command)[0]
                     except:
                         # Timeout or other error, check shutdown event and continue
@@ -1446,14 +1448,14 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                         data_frame = b''
                         if cmd.start_frame == 0xFFFFFFFF and cmd.transfer_flags == 0x0:
                             colour_print(colour=bcolors.OKYELLOW, component='USBIPConnection.handle', msg='CTAPHID:: '\
-                                    'FIDO2 Authenticator recieved start_frame, reading rest of data maybe . . .')
+                                    'FIDO2 Authenticator received start_frame, reading rest of data maybe . . .')
                             try:
                                 data_frame = self._recv_exact(cmd.transfer_buffer_length)
                             except Exception:
                                 colour_print(colour=bcolors.WARNING, component='USBIP',
                                              msg='incomplete data frame, continuing')
                                 continue
-                            dump_bytes(data_frame, component='USBIPConnection.handle', msg='data bytes recieved:')
+                            dump_bytes(data_frame, component='USBIPConnection.handle', msg='data bytes received:')
                         usb_req = USBRequest(seqnum=cmd.seqnum,
                                              devid=cmd.devid,
                                              direction=cmd.direction,
@@ -1467,7 +1469,7 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                         dump_bytes(list((usb_req.setup or 0).to_bytes(8, 'big')), colour=bcolors.FAIL,
                                    component='USBDevice(send_usb_req)', msg='setup bytes:')
                         dump_bytes(list(usb_req.cmd_frame), list(usb_req.data_frame), colour=bcolors.FAIL, 
-                                    component='USBDevice(request)', msg='whole recieved message:')
+                                    component='USBDevice(request)', msg='whole received message:')
                         usbcontainer.usb_devices[self.attachedBusID].connection = self.request
                         try:
                             usbcontainer.usb_devices[self.attachedBusID].handle_usb_request(usb_req)
@@ -1496,7 +1498,7 @@ class USBIPConnection(socketserver.BaseRequestHandler):
                         self.request.sendall(ret.pack())
 
                     else:
-                        raise Exception("Unknown USB/IP command recieved")
+                        raise Exception("Unknown USB/IP command received")
         self.request.close()
 
 
@@ -1519,9 +1521,10 @@ if __name__ == '__main__':
             $ sudo usbip attach -r 127.0.0.1 -b 1-1.1
             $ lsusb -v -d 3713:3713
     """
-    print("Starting FIDO2 USB/IP Authenticator...")
-    print("Vendor ID: 0x3713, Product ID: 0x3713")
-    print("Waiting for USB/IP client connection on port 3240...")
+    log = logging.getLogger('soft_fido2')
+    log.info("Starting FIDO2 USB/IP Authenticator...")
+    log.info("Vendor ID: 0x3713, Product ID: 0x3713")
+    log.info("Waiting for USB/IP client connection on port 3240...")
     
     # Create FIDO2 USB/IP device
     # All USB/IP protocol handling and CTAPHID frame processing is in CTAP2USBIPDevice
@@ -1537,9 +1540,7 @@ if __name__ == '__main__':
     try:
         usb_container.run()
     except KeyboardInterrupt:
-        print("\nShutting down USB/IP authenticator...")
+        log.info("Shutting down USB/IP authenticator...")
     except Exception as e:
-        print(f"Error running USB/IP authenticator: {e}")
-        import traceback
-        traceback.print_exc()
+        log.exception("Error running USB/IP authenticator: %s", e)
         raise
