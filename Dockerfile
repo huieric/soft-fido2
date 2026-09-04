@@ -9,7 +9,6 @@ WORKDIR /app
 COPY soft_fido2/ soft_fido2/
 COPY pyproject.toml README.md ./
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY provision_passkey.py /usr/local/bin/provision_passkey.py
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Writable directory that stores the platform key and registered passkeys
@@ -20,8 +19,8 @@ VOLUME ["/run/fido"]
 
 # The authenticator requires FIDO_HOME to locate its key material.
 ENV FIDO_HOME=/run/fido
-# The source package is copied to /app/soft_fido2, while the provisioning
-# helper is installed in /usr/local/bin. Keep /app on Python's import path.
+# The source package is copied to /app/soft_fido2. Keep /app on Python's
+# import path so `python -m soft_fido2` resolves.
 ENV PYTHONPATH=/app
 
 EXPOSE 3240
