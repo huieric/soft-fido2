@@ -1,5 +1,11 @@
 # soft-fido2-headless
 
+[English](README.md) · [中文](README.zh-CN.md)
+
+> **Forked from** [`lachlan-ibm/soft-fido2`](https://github.com/lachlan-ibm/soft-fido2) (MIT).
+> The `upstream` remote points at that official project; this fork keeps the official
+> CTAP2/U2F engine but repackages it for headless Docker + USB/IP.
+
 A **headless** software FIDO2 passkey authenticator, built on the official
 [`lachlan-ibm/soft-fido2`](https://github.com/lachlan-ibm/soft-fido2) (MIT) code
 base, and packaged to run in Docker as a **real USB device over USB/IP**.
@@ -231,11 +237,7 @@ for the full end-to-end account of this deployment and the dead-ends we hit.
 
 ## Branches
 
-- `master` — official-code headless build (this documentation).
-- `archive/self-developed-ctap2` — the earlier self-written CTAP2 core
-  (frozen; import-based, no registration).
-- `official-platform-passkey` — tracks upstream `development` with the headless
-  patches applied.
+- `master` — the only maintained branch; the headless USB/IP build documented here.
 
 ## License
 
