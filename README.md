@@ -13,6 +13,10 @@ base, and packaged to run in Docker as a **real USB device over USB/IP**.
 It serves IB Gateway's embedded Chromium (JxBrowser) so that a passkey login can
 be completed with no GUI, no fingerprint scanner, and no physical security key.
 
+> **Companion project**: [`huieric/ibga-docker`](https://github.com/huieric/ibga-docker) —
+> runs IB Gateway headless in Docker and drives this authenticator for fully
+> unattended IBKR passkey login. The two containers are designed to work together.
+
 ## Why USB/IP instead of UHID?
 
 UHID (`/dev/uhid`) creates a *virtual HID device* under
@@ -242,4 +246,8 @@ for the full end-to-end account of this deployment and the dead-ends we hit.
 ## License
 
 MIT, as per the upstream `lachlan-ibm/soft-fido2` project.
+
+## Topics
+
+`ibkr` `interactive-brokers` `ib-gateway` `docker` `headless` `unattended` `passkey` `fido2` `webauthn` `usbip` `security-key` `trading` `automation`
 

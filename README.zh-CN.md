@@ -12,6 +12,10 @@
 它为 IB Gateway 内嵌的 Chromium（JxBrowser）服务，使 passkey 登录无需 GUI、
 无需指纹扫描器、无需实体安全密钥即可完成。
 
+> **配套项目**：[`huieric/ibga-docker`](https://github.com/huieric/ibga-docker) —
+> 在 Docker 中以无头模式运行 IB Gateway，并驱动本认证器实现完全无人值守的 IBKR
+> passkey 登录。两个容器被设计为配合使用。
+
 ## 为什么用 USB/IP 而不是 UHID？
 
 UHID（`/dev/uhid`）在 `/sys/devices/virtual/` 下创建一个**虚拟 HID 设备**，
@@ -229,3 +233,7 @@ privateKey (base64url): <redacted>
 ## 许可证
 
 MIT，遵循上游 `lachlan-ibm/soft-fido2` 项目。
+
+## Topics
+
+`ibkr` `interactive-brokers` `ib-gateway` `docker` `headless` `unattended` `passkey` `fido2` `webauthn` `usbip` `security-key` `trading` `automation`
